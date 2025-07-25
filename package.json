@@ -1,0 +1,17 @@
+{
+  "name": "my-gas-spreadsheet-script-nissei",
+  "version": "1.0.0",
+  "description": "Nissei Spreadsheet Google Apps Script project managed with Docker",
+  "scripts": {
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "deploy": "clasp deploy",
+    "open": "clasp open",
+    "login": "clasp login",
+    "create": "clasp create --type standalone"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.4.2",
+    "@types/google-apps-script": "^1.0.0"
+  }
+}
