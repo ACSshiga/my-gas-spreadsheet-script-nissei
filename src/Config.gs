@@ -1,0 +1,263 @@
+/**
+ * Config.gs
+ * システム全体の設定定数を管理
+ * 列の追加やステータスの追加に対応できる柔軟な設計
+ */
+
+// =================================================================================
+// === グローバル設定 ===
+// =================================================================================
+
+const CONFIG = {
+  // Google DriveフォルダID
+  FOLDERS: {
+    REFERENCE_MATERIAL_PARENT: "124OR71hkr2jeT-5esv0GHAeZn83fAvYc",
+    SERIES_MODEL_PARENT: "1XdiYBWiixF_zOSScT7UKUhCQkye3MLNJ",
+    BACKUP_PARENT: "1HCDyjF_Kw2jlzN491uZK1X6QeXFuOWSl"
+  },
+
+  // シート名
+  SHEETS: {
+    KIBAN_MASTER: "機番マスタ",
+    MAIN: "メインシート",
+    INPUT_PREFIX: "工数_",
+    PRODUCTION_MASTER: "生産管理マスタ"
+  },
+
+  // 色設定
+  COLORS: {
+    DUPLICATE_HIGHLIGHT: '#e8eaed',
+    DEFAULT_BACKGROUND: '#ffffff',
+    WEEKEND_HOLIDAY: '#e8eaed'
+  },
+
+  // バックアップ設定
+  BACKUP: {
+    KEEP_COUNT: 5,
+    PREFIX: "【Backup】"
+  },
+
+  // 日本の祝日カレンダーID
+  HOLIDAY_CALENDAR_ID: 'ja.japanese#holiday@group.v.calendar.google.com',
+
+  // デフォルト値
+  DEFAULTS: {
+    PROGRESS: "未着手",
+    DUPLICATE_TEXT: "機番重複"
+  }
+};
+
+// =================================================================================
+// === 動的な色設定（ステータス追加に対応） ===
+// =================================================================================
+
+/**
+ * 進捗ステータスと色のマッピング
+ * 新しいステータスはここに追加するだけでOK
+ */
+const PROGRESS_COLORS = new Map([
+  ["未着手", "#ffcfc9"],
+  ["配置済", "#d4edbc"],
+  ["ACS済", "#bfe1f6"],
+  ["日精済", "#ffe5a0"],
+  ["係り中", "#e6cff2"],
+  ["機番重複", "#e8eaed"],
+  ["保留", "#c6dbe1"],
+  ["完了", "#d4edbc"]
+  // 新しいステータスをここに追加
+  // ["新ステータス", "#色コード"],
+]);
+
+/**
+ * 担当者と色のマッピング
+ */
+const TANTOUSHA_COLORS = new Map([
+  ["志賀", "#ffcfc9"],
+  ["遠藤", "#d4edbc"],
+  ["小板橋", "#bfe1f6"]
+  // 新しい担当者をここに追加
+]);
+
+/**
+ * 問い合わせステータスと色のマッピング
+ */
+const TOIAWASE_COLORS = new Map([
+  ["問合済", "#ffcfc9"],
+  ["回答済", "#bfe1f6"]
+  // 新しいステータスをここに追加
+]);
+
+// =================================================================================
+// === シート列定義（ヘッダー名ベース） ===
+// =================================================================================
+
+/**
+ * 機番マスタシートの列定義
+ * ヘッダー名をキーとして使用（列追加に対応）
+ */
+const KIBAN_MASTER_HEADERS = {
+  MGMT_NO: "管理Ｎｏ．",
+  KIBAN: "機番",
+  MODEL: "機種",
+  DESTINATION: "納入先",
+  PLANNED_HOURS: "予定工数(h)",
+  DRAWING_DEADLINE: "作図期限",
+  PROGRESS: "進捗",
+  FOLDER_URL: "製番資料",
+  SERIES_FOLDER_URL: "STD資料"
+  // 新しい列はここに追加
+};
+
+/**
+ * メインシートの列定義
+ */
+const MAIN_SHEET_HEADERS = {
+  MGMT_NO: "管理No",
+  KIBAN: "機番",
+  MODEL: "機種",
+  KIBAN_URL: "機番(リンク)",
+  SERIES_URL: "STD資料(リンク)",
+  REFERENCE_KIBAN: "参考製番",
+  TOIAWASE: "問い合わせ",
+  TEMP_CODE: "仮コード",
+  TANTOUSHA: "担当者",
+  DESTINATION: "納入先",
+  PLANNED_HOURS: "予定工数",
+  TOTAL_LABOR: "合計工数",
+  PROGRESS: "進捗",
+  DRAWING_DEADLINE: "作図期限",
+  PROGRESS_EDITOR: "進捗記入者",
+  UPDATE_TS: "更新日時",
+  COMPLETE_DATE: "完了日",
+  ASSEMBLY_START: "組み立て開始日",
+  REMARKS: "備考"
+  // 新しい列はここに追加
+};
+
+/**
+ * 工数シートの列定義
+ */
+const INPUT_SHEET_HEADERS = {
+  MGMT_NO: "管理No.",
+  KIBAN: "機番",
+  MODEL: "機種",
+  TANTOU: "担当者",
+  TOIAWASE: "問合せ",
+  DEADLINE: "作図期限",
+  PROGRESS: "進捗",
+  TIMESTAMP: "更新日時",
+  PLANNED_HOURS: "予定工数",
+  TOTAL_HOURS: "合計工数"
+  // LABOR_START以降は日付列なので動的に処理
+};
+
+/**
+ * 生産管理マスタの列定義
+ */
+const PROD_MASTER_HEADERS = {
+  NO: "No",
+  SEIBAN: "製番",
+  MODEL: "機種",
+  DESTINATION: "納入先",
+  ASSEMBLY_START: "組立開始日"
+  // 新しい列はここに追加
+};
+
+// =================================================================================
+// === 列インデックス取得関数 ===
+// =================================================================================
+
+/**
+ * ヘッダー行から列インデックスを動的に取得
+ * @param {Sheet} sheet - 対象シート
+ * @param {Object} headerDef - ヘッダー定義オブジェクト
+ * @return {Object} ヘッダー名をキー、列インデックスを値とするオブジェクト
+ */
+function getColumnIndices(sheet, headerDef) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `col_indices_${sheet.getName()}`;
+  const cached = cache.get(cacheKey);
+  
+  if (cached) {
+    return JSON.parse(cached);
+  }
+  
+  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const indices = {};
+  
+  // ヘッダー定義のキーと実際のヘッダーをマッピング
+  for (const [key, headerName] of Object.entries(headerDef)) {
+    const index = headerRow.indexOf(headerName) + 1; // 1-based index
+    if (index > 0) {
+      indices[key] = index;
+    } else {
+      console.warn(`ヘッダー "${headerName}" が見つかりません: ${sheet.getName()}`);
+    }
+  }
+  
+  // 追加の列（定義外）も検出
+  headerRow.forEach((header, idx) => {
+    if (header && !Object.values(headerDef).includes(header)) {
+      const key = header.replace(/[^\w]/g, '_').toUpperCase();
+      indices[key] = idx + 1;
+      console.log(`新しい列を検出: "${header}" (${key})`);
+    }
+  });
+  
+  cache.put(cacheKey, JSON.stringify(indices), BATCH_CONFIG.CACHE_EXPIRATION);
+  return indices;
+}
+
+/**
+ * 色を取得する汎用関数
+ * @param {Map} colorMap - 色のマッピング
+ * @param {string} key - ステータスや名前
+ * @return {string} 色コード（見つからない場合はデフォルト色）
+ */
+function getColor(colorMap, key) {
+  return colorMap.get(key) || CONFIG.COLORS.DEFAULT_BACKGROUND;
+}
+
+// =================================================================================
+// === 日付フォーマット定義 ===
+// =================================================================================
+
+const DATE_FORMATS = {
+  DATE_ONLY: "yyyy/MM/dd",
+  DATETIME: "yyyy-MM-dd HH:mm",
+  MONTH_DAY: "M/d",
+  BACKUP_TIMESTAMP: "yyyy-MM-dd_HH-mm"
+};
+
+// =================================================================================
+// === バッチ処理設定 ===
+// =================================================================================
+
+const BATCH_CONFIG = {
+  MAX_ROWS_PER_BATCH: 500,
+  MAX_CELLS_PER_REQUEST: 50000,
+  CACHE_EXPIRATION: 300
+};
+
+// =================================================================================
+// === エラーメッセージ ===
+// =================================================================================
+
+const ERROR_MESSAGES = {
+  SHEET_NOT_FOUND: "エラー: 必要なシートが見つかりません。",
+  NO_DATA: "情報: データがありません。",
+  FOLDER_CREATE_ERROR: "フォルダ作成/取得エラー: ",
+  BACKUP_ERROR: "バックアップエラー: ",
+  COLUMN_NOT_FOUND: "エラー: 必要な列が見つかりません: "
+};
+
+// =================================================================================
+// === 処理メッセージ ===
+// =================================================================================
+
+const PROCESS_MESSAGES = {
+  START: "処理を開始します...",
+  COMPLETE: "自動処理が完了しました。",
+  UPDATE_COMPLETE: "更新が完了しました。",
+  REBUILDING: "再構築中..."
+};
