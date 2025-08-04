@@ -1,5 +1,113 @@
 /**
  * SheetService.gs
+ * スプレッドシートの各シートをオブジェクトとして効率的に扱うためのクラスを定義します。
+ * この設計により、コードの再利用性とメンテナンス性が向上します。
+ */
+
+// =================================================================================
+// === すべてのシートクラスの基盤となる抽象クラス ===
+// =================================================================================
+class SheetService {
+  /**
+   * @param {string} sheetName 操作対象のシート名
+   */
+  constructor(sheetName) {
+    if (this.constructor === SheetService) {
+      throw new Error("SheetServiceは抽象クラスのためインスタンス化できません。");
+    }
+    this.ss = SpreadsheetApp.getActiveSpreadsheet();
+    this.sheet = this.ss.getSheetByName(sheetName);
+    if (!this.sheet) {
+      throw new Error(`シート「${sheetName}」が見つかりません。`);
+    }
+    this.sheetName = sheetName;
+  }
+
+  /** @return {GoogleAppsScript.Spreadsheet.Sheet} シートオブジェクトを返す */
+  getSheet() { return this.sheet; }
+  /** @return {number} シートの最終行番号を返す */
+  getLastRow() { return this.sheet.getLastRow(); }
+  /** @return {number} シートの最終列番号を返す */
+  getLastColumn() { return this.sheet.getLastColumn(); }
+  /** @return {string} シート名を返す */
+  getName() { return this.sheetName; }
+}
+
+
+// =================================================================================
+// === メインシートを操作するためのクラス ===
+// =================================================================================
+class MainSheet extends SheetService {
+  constructor() {
+    super(CONFIG.SHEETS.MAIN);
+    this.indices = getColumnIndices(this.sheet, MAIN_SHEET_HEADERS);
+  }
+
+  /**
+   * 「担当者マスタ」シートから担当者の情報（名前とメールアドレス）を取得します。
+   * @return {{name: string, email: string}[]} 担当者情報の配列
+   */
+  getTantoushaList() {
+    const masterSheet = this.ss.getSheetByName(CONFIG.SHEETS.TANTOUSHA_MASTER);
+    if (!masterSheet) {
+      SpreadsheetApp.getUi().alert(`シート「${CONFIG.SHEETS.TANTOUSHA_MASTER}」が見つかりません。`);
+      return [];
+    }
+    const lastRow = masterSheet.getLastRow();
+    if (lastRow < 2) return [];
+
+    const data = masterSheet.getRange(2, 1, lastRow - 1, 2).getValues();
+    return data.map(row => ({ name: row[0], email: row[1] })).filter(item => item.name && item.email);
+  }
+
+  /**
+   * メインシートの全データを、一意なキー（管理No + 作業区分）でMapとして取得します。
+   * @return {Map<string, Object>}
+   */
+  getDataMap() {
+    const lastRow = this.getLastRow();
+    if (lastRow < 2) return new Map();
+
+    const values = this.sheet.getRange(2, 1, lastRow - 1, this.getLastColumn()).getValues();
+    const dataMap = new Map();
+
+    values.forEach(row => {
+      const mgmtNo = row[this.indices.MGMT_NO - 1];
+      const sagyouKubun = row[this.indices.SAGYOU_KUBUN - 1];
+      if (mgmtNo && sagyouKubun) {
+        const uniqueKey = `${mgmtNo}_${sagyouKubun}`;
+        dataMap.set(uniqueKey, row);
+      }
+    });
+
+    return dataMap;
+  }
+}
+
+
+// =================================================================================
+// === 工数シートを操作するためのクラス ===
+// =================================================================================
+class InputSheet extends SheetService {
+  /**
+   * @param {string} tantoushaName 担当者名 (例: "志賀")
+   */
+  constructor(tantoushaName) {
+    const sheetName = `${CONFIG.SHEETS.INPUT_PREFIX}${tantoushaName}`;
+    super(sheetName);
+    this.tantoushaName = tantoushaName;
+    this.indices = getColumnIndices(this.sheet, INPUT_SHEET_HEADERS);
+  }
+
+  /**
+   * このシートの担当者名を返します。
+   * @return {string}
+   */
+  getTantoushaName() {
+    return this.tantoushaName;
+  }
+}/**
+ * SheetService.gs
  * スプレッドシートの各シートをオブジェクトとして扱うためのクラスを定義します。
  */
 

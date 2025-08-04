@@ -1,6 +1,212 @@
 /**
  * Code.gs
  * イベントハンドラとカスタムメニューを管理する司令塔。
+ * スプレッドシートの操作をトリガーに、各機能を呼び出します。
+ */
+
+// =================================================================================
+// === イベントハンドラ (スプレッドシート操作時に自動実行) ===
+// =================================================================================
+
+/**
+ * スプレッドシートが開かれたときに実行される関数です。
+ * カスタムメニューの作成と、前回のフィルタ状態の復元を行います。
+ */
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+
+  // カスタムメニューを作成
+  ui.createMenu('カスタムメニュー')
+    .addItem('自分の担当案件のみ表示', 'applyMyTasksFilter')
+    .addItem('すべての案件を表示', 'clearAllFilters')
+    .addSeparator()
+    .addItem('サイドバーを開く (フィルタ)', 'showFilterSidebar')
+    .addSeparator()
+    .addItem('全機番の資料フォルダ作成', 'bulkCreateKibanFolders')
+    .addItem('全機種シリーズのフォルダ作成', 'bulkCreateSeriesFolders')
+    .addSeparator()
+    .addItem('週次バックアップを作成', 'createWeeklyBackup')
+    .addToUi();
+
+  // 前回のフィルタ状態を復元
+  restoreLastFilter();
+}
+
+/**
+ * スプレッドシートが編集されたときに実行される関数です。
+ * データの同期や自動更新処理を呼び出します。
+ * @param {GoogleAppsScript.Events.SheetsOnEdit} e - イベントオブジェクト
+ */
+function onEdit(e) {
+  if (!e || !e.source || !e.range) return;
+  const sheet = e.range.getSheet();
+  const sheetName = sheet.getName();
+
+  // メインシートが編集された場合：全担当者の工数シートに即時同期
+  if (sheetName === CONFIG.SHEETS.MAIN) {
+    // ToDo: メインシートの変更を全工数シートに同期する処理を実装
+    // syncMainToAllInputSheets();
+    SpreadsheetApp.getActiveSpreadsheet().toast('メインシートが更新されました。工数シートに同期します。');
+  }
+  // 工数シートが編集された場合：メインシートに実績や進捗を反映
+  else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+    // ToDo: 工数シートの変更をメインシートに集計・反映する処理を実装
+    // syncInputToMain(sheetName);
+    SpreadsheetApp.getActiveSpreadsheet().toast(`${sheetName} が更新されました。メインシートに反映します。`);
+  }
+}
+
+// =================================================================================
+// === カスタムメニュー機能 (フィルタリング) ===
+// =================================================================================
+
+/**
+ * 現在のユーザーが担当する案件のみを表示するフィルタを適用します。
+ */
+function applyMyTasksFilter() {
+  const userEmail = Session.getActiveUser().getEmail();
+  const tantoushaName = getTantoushaNameByEmail(userEmail); // 担当者マスタから名前を取得
+
+  if (tantoushaName) {
+    const filterSettings = {
+      column: MAIN_SHEET_HEADERS.TANTOUSHA,
+      value: tantoushaName
+    };
+    applyFilter(filterSettings);
+    saveLastFilter(filterSettings); // フィルタ状態を記憶
+    SpreadsheetApp.getActiveSpreadsheet().toast(`担当者: ${tantoushaName} で絞り込みました。`);
+  } else {
+    SpreadsheetApp.getUi().alert('あなたのメールアドレスが担当者マスタに見つかりません。');
+  }
+}
+
+/**
+ * 現在適用されているすべてのフィルタを解除し、全案件を表示します。
+ */
+function clearAllFilters() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
+  if (!sheet) return;
+
+  const existingFilter = sheet.getFilter();
+  if (existingFilter) {
+    existingFilter.remove();
+  }
+  
+  // フィルタ表示をすべて削除
+  const filterViews = sheet.getFilterViews();
+  filterViews.forEach(view => view.remove());
+
+  clearLastFilter(); // 記憶したフィルタを消去
+  SpreadsheetApp.getActiveSpreadsheet().toast('すべてのフィルタを解除しました。');
+}
+
+/**
+ * フィルタリング用のサイドバーを表示します。
+ */
+function showFilterSidebar() {
+  const html = HtmlService.createHtmlOutputFromFile('Sidebar.html')
+      .setTitle('パーソナルフィルタ')
+      .setWidth(300);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+
+// =================================================================================
+// === フィルタの内部処理 ===
+// =================================================================================
+
+/**
+ * 指定された設定でフィルタ表示を適用します。
+ * @param {Object} filterSettings - { column: 'ヘッダー名', value: '値' }
+ */
+function applyFilter(filterSettings) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
+  if (!sheet) return;
+
+  const userEmail = Session.getActiveUser().getEmail();
+  const indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
+  const targetColIndex = indices[Object.keys(MAIN_SHEET_HEADERS).find(key => MAIN_SHEET_HEADERS[key] === filterSettings.column)];
+
+  if (!targetColIndex) {
+    SpreadsheetApp.getUi().alert(`列「${filterSettings.column}」が見つかりません。`);
+    return;
+  }
+
+  // 既存の個人用フィルタ表示を削除
+  const filterViews = sheet.getFilterViews();
+  filterViews.forEach(view => {
+    if (view.getName().includes(userEmail)) {
+      view.remove();
+    }
+  });
+
+  // 新しいフィルタ表示を作成
+  const filterView = sheet.createFilterView();
+  filterView.setName(`Filter-${userEmail}-${new Date().getTime()}`); // ユニークな名前
+  
+  const criteria = SpreadsheetApp.newFilterCriteria()
+      .setHiddenValues(['']) // 空白行は非表示
+      .whenTextEqualTo(filterSettings.value)
+      .build();
+  
+  filterView.setColumnFilterCriteria(targetColIndex, criteria);
+  
+  // 重要：フィルタ表示を適用する (これだけでは他の人に見えない)
+  SpreadsheetApp.setActiveSheet(sheet); // シートをアクティブに
+  SpreadsheetApp.flush(); // 保留中の変更を適用
+  // 注意: Apps Scriptから直接FilterViewを「アクティブ」にするAPIはないため、
+  // ユーザーに手動で適用してもらうか、このスクリプトでは設定の保存と作成に注力します。
+  // ここでは、フィルタを作成し、ユーザーが手動でオンにできるように準備します。
+}
+
+
+/**
+ * 最後に使用したフィルタ設定をユーザープロパティに保存します。
+ * @param {Object} filterSettings - 保存するフィルタ設定
+ */
+function saveLastFilter(filterSettings) {
+  PropertiesService.getUserProperties().setProperty('lastFilter', JSON.stringify(filterSettings));
+}
+
+/**
+ * 保存されたフィルタ設定を読み込み、シートに適用します。
+ */
+function restoreLastFilter() {
+  const lastFilterJson = PropertiesService.getUserProperties().getProperty('lastFilter');
+  if (lastFilterJson) {
+    const lastFilter = JSON.parse(lastFilterJson);
+    applyFilter(lastFilter);
+    SpreadsheetApp.getActiveSpreadsheet().toast('前回のフィルタを復元しました。');
+  }
+}
+
+/**
+ * 保存されたフィルタ設定を削除します。
+ */
+function clearLastFilter() {
+  PropertiesService.getUserProperties().deleteProperty('lastFilter');
+}
+
+/**
+* メールアドレスから担当者マスタを検索し、対応する担当者名を返します。
+* @param {string} email - 検索するメールアドレス
+* @return {string|null} - 見つかった担当者名、またはnull
+*/
+function getTantoushaNameByEmail(email) {
+  const masterSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.TANTOUSHA_MASTER);
+  if (!masterSheet) return null;
+
+  const data = masterSheet.getDataRange().getValues();
+  // ヘッダーをスキップして検索
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][1] === email) { // 2列目(B列)にメールアドレスがあると仮定
+      return data[i][0]; // 1列目(A列)の担当者名を返す
+    }
+  }
+  return null;
+}/**
+ * Code.gs
+ * イベントハンドラとカスタムメニューを管理する司令塔。
  */
 
 function onEdit(e) {

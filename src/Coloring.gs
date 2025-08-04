@@ -1,4 +1,98 @@
+/**
+ * Coloring.gs
+ * シートの自動色付けに関する機能を管理します。
+ * データの状態を視覚的に分かりやすくします。
+ */
+
 // =================================================================================
+// === 色付け処理（メイン） ===
+// =================================================================================
+
+/**
+ * すべてのシートの色付けをまとめて実行するメイン関数です。
+ */
+function colorizeAllSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadhaustive();
+  
+  // メインシートの色付け
+  const mainSheet = new MainSheet();
+  colorizeSheet_(mainSheet);
+
+  // 全担当者の工数シートの色付け
+  const tantoushaList = mainSheet.getTantoushaList();
+  tantoushaList.forEach(tantousha => {
+    try {
+      const inputSheet = new InputSheet(tantousha.name);
+      colorizeSheet_(inputSheet);
+      colorizeHolidayColumns_(inputSheet); // 工数シートの休日色付けも実行
+    } catch (e) {
+      // シートが存在しない場合はスキップ
+    }
+  });
+
+  logWithTimestamp("全シートの色付け処理が完了しました。");
+}
+
+/**
+ * 指定されたシートオブジェクトの各列をルールに基づいて色付けする内部関数。
+ * @param {MainSheet | InputSheet} sheetObject - 色付け対象のシートオブジェクト
+ */
+function colorizeSheet_(sheetObject) {
+  const sheet = sheetObject.getSheet();
+  const indices = sheetObject.indices;
+  const lastRow = sheetObject.getLastRow();
+  const startRow = (sheetObject instanceof MainSheet) ? 2 : 2;
+
+  if (lastRow < startRow) return;
+
+  const range = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn());
+  const values = range.getValues();
+  const backgroundColors = Array(values.length).fill(null).map(() => Array(values[0].length).fill(null));
+
+  values.forEach((row, i) => {
+    // メインシートの場合のみ、担当者と問い合わせの色付けを行う
+    if (sheetObject instanceof MainSheet) {
+      const tantousha = safeTrim(row[indices.TANTOUSHA - 1]);
+      const toiawase = safeTrim(row[indices.TOIAWASE - 1]);
+      backgroundColors[i][indices.TANTOUSHA - 1] = getColor(TANTOUSHA_COLORS, tantousha);
+      backgroundColors[i][indices.TOIAWASE - 1] = getColor(TOIAWASE_COLORS, toiawase);
+    }
+    
+    // 両シート共通の色付け
+    const progress = safeTrim(row[indices.PROGRESS - 1]);
+    backgroundColors[i][indices.MGMT_NO - 1] = getColor(PROGRESS_COLORS, progress);
+    backgroundColors[i][indices.PROGRESS - 1] = getColor(PROGRESS_COLORS, progress);
+  });
+
+  // 色情報をまとめて一度に設定
+  range.setBackgrounds(backgroundColors);
+}
+
+/**
+ * 工数シートの土日・祝日の日付列に背景色を設定します。
+ */
+function colorizeHolidayColumns_(inputSheetObject) {
+  const sheet = inputSheetObject.getSheet();
+  const indices = inputSheetObject.indices;
+  const lastCol = sheet.getLastColumn();
+  const dateColumnStart = Object.keys(INPUT_SHEET_HEADERS).length + 1;
+
+  if (lastCol < dateColumnStart) return;
+
+  const year = new Date().getFullYear();
+  const holidays = getJapaneseHolidays(year); // 今年と来年の祝日を取得
+  Object.assign(holidays, getJapaneseHolidays(year + 1));
+  
+  const headerRange = sheet.getRange(1, dateColumnStart, 1, lastCol - dateColumnStart + 1);
+  const headerDates = headerRange.getValues()[0];
+
+  headerDates.forEach((date, i) => {
+    const currentCol = dateColumnStart + i;
+    if (isValidDate(date) && isHoliday(date, holidays)) {
+      sheet.getRange(1, currentCol, sheet.getMaxRows()).setBackground(CONFIG.COLORS.WEEKEND_HOLIDAY);
+    }
+  });
+}// =================================================================================
 // === 色付け・視覚的補助 (最終レイアウト対応版) ===
 // =================================================================================
 function colorizeLaborInputColumnsOnHolidaysAndWeekends() {
