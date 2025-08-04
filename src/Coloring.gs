@@ -145,4 +145,114 @@ function colorizeToiawaseCellInInputSheets() {
     
     sheet.getRange(3, INPUT_SHEET_TOIAWASE_COL, newBgs.length, 1).setBackgrounds(newBgs);
   });
+}/**
+ * Coloring.gs
+ * シートの自動色付けに関する機能を管理
+ */
+
+// =================================================================================
+// === 色付け処理（メイン） ===
+// =================================================================================
+
+/**
+ * すべてのシートの色付けをまとめて実行するメイン関数。
+ */
+function colorizeAllSheets() {
+  const mainSheet = new MainSheet();
+  const tantoushaList = mainSheet.getTantoushaList();
+
+  // メインシートの色付け
+  colorizeSheet_(mainSheet);
+
+  // 各工数シートの色付け
+  tantoushaList.forEach(tantousha => {
+    try {
+      const inputSheet = new InputSheet(tantousha);
+      colorizeSheet_(inputSheet);
+    } catch (e) {
+      // シートが存在しない場合はスキップ
+    }
+  });
+
+  // 工数シートの日付列の色付け
+  colorizeHolidayColumns_();
+  logWithTimestamp("全シートの色付け処理が完了しました。");
+}
+
+/**
+ * 指定されたシートオブジェクトの各列をルールに基づいて色付けする内部関数。
+ * @param {MainSheet | InputSheet} sheetObject - 色付け対象のシートオブジェクト
+ */
+function colorizeSheet_(sheetObject) {
+  const sheet = sheetObject.getSheet();
+  const indices = sheetObject.indices;
+  const lastRow = sheetObject.getLastRow();
+  const startRow = (sheetObject instanceof MainSheet) ? 2 : 2; // データ開始行
+
+  if (lastRow < startRow) return;
+
+  const range = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheetObject.getLastColumn());
+  const values = range.getValues();
+
+  // 色情報を格納する2次元配列を準備
+  const backgroundColors = range.getBackgrounds();
+
+  values.forEach((row, i) => {
+    // 各列の値を取得
+    const progressPanel = safeTrim(row[indices.PROGRESS_PANEL - 1]);
+    const progressWire = safeTrim(row[indices.PROGRESS_WIRE - 1]);
+    const tantousha = safeTrim(row[indices.TANTOUSHA - 1]);
+    const toiawase = safeTrim(row[indices.TOIAWASE - 1]);
+
+    // 色を決定
+    const mgmtNoColor = (progressPanel === '完了' && progressWire === '完了') 
+      ? getColor(PROGRESS_COLORS, '完了') 
+      : (progressPanel === '未着手' && progressWire === '未着手') 
+        ? getColor(PROGRESS_COLORS, '未着手') 
+        : getColor(PROGRESS_COLORS, '仕掛中');
+
+    // 配列の対応する位置に色情報をセット
+    backgroundColors[i][indices.MGMT_NO - 1] = mgmtNoColor;
+    backgroundColors[i][indices.PROGRESS_PANEL - 1] = getColor(PROGRESS_COLORS, progressPanel);
+    backgroundColors[i][indices.PROGRESS_WIRE - 1] = getColor(PROGRESS_COLORS, progressWire);
+    backgroundColors[i][indices.TANTOUSHA - 1] = getColor(TANTOUSHA_COLORS, tantousha);
+    backgroundColors[i][indices.TOIAWASE - 1] = getColor(TOIAWASE_COLORS, toiawase);
+  });
+
+  // 範囲に背景色を一度に設定
+  range.setBackgrounds(backgroundColors);
+}
+
+/**
+ * 工数シートの土日・祝日の日付列に背景色を設定します。
+ */
+function colorizeHolidayColumns_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const mainSheet = new MainSheet();
+  const tantoushaList = mainSheet.getTantoushaList();
+  
+  const holidays = getJapaneseHolidays(new Date(new Date().getFullYear(), 0, 1), new Date(new Date().getFullYear() + 1, 11, 31));
+
+  tantoushaList.forEach(tantousha => {
+    try {
+      const inputSheet = new InputSheet(tantousha);
+      const sheet = inputSheet.getSheet();
+      const lastCol = inputSheet.getLastColumn();
+      
+      const dateColumnStart = Object.keys(INPUT_SHEET_HEADERS).length + 1;
+      if (lastCol < dateColumnStart) return;
+
+      const headerRange = sheet.getRange(1, dateColumnStart, 1, lastCol - dateColumnStart + 1);
+      const headerDates = headerRange.getValues()[0];
+
+      headerDates.forEach((date, i) => {
+        const currentCol = dateColumnStart + i;
+        if (isValidDate(date) && isHoliday(date, holidays)) {
+          sheet.getRange(1, currentCol, sheet.getMaxRows()).setBackground(CONFIG.COLORS.WEEKEND_HOLIDAY);
+        }
+      });
+    } catch (e) {
+      // シートが存在しない場合はスキップ
+    }
+  });
 }

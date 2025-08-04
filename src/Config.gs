@@ -1,6 +1,165 @@
 /**
  * Config.gs
  * システム全体の設定定数を管理
+ */
+
+// =================================================================================
+// === グローバル設定 ===
+// =================================================================================
+const CONFIG = {
+  // Google DriveフォルダID
+  FOLDERS: {
+    REFERENCE_MATERIAL_PARENT: "124OR71hkr2jeT-5esv0GHAeZn83fAvYc",
+    SERIES_MODEL_PARENT: "1XdiYBWiixF_zOSScT7UKUhCQkye3MLNJ",
+    BACKUP_PARENT: "1HCDyjF_Kw2jlzN491uZK1X6QeXFuOWSl"
+  },
+
+  // シート名
+  SHEETS: {
+    MAIN: "メインシート",
+    INPUT_PREFIX: "工数_",
+    TANTOUSHA_MASTER: "担当者マスタ", // ★担当者マスタシートを定義
+  },
+
+  // 色設定
+  COLORS: {
+    DUPLICATE_HIGHLIGHT: '#e8eaed',
+    DEFAULT_BACKGROUND: '#ffffff',
+    WEEKEND_HOLIDAY: '#e8eaed'
+  },
+
+  // バックアップ設定
+  BACKUP: {
+    KEEP_COUNT: 5,
+    PREFIX: "【Backup】"
+  },
+
+  // 日本の祝日カレンダーID
+  HOLIDAY_CALENDAR_ID: 'ja.japanese#holiday@group.v.calendar.google.com',
+
+  // デフォルト値
+  DEFAULTS: {
+    PROGRESS: "未着手",
+    DUPLICATE_TEXT: "機番重複"
+  }
+};
+
+// =================================================================================
+// === 動的な色設定 ===
+// =================================================================================
+const PROGRESS_COLORS = new Map([
+  ["未着手", "#ffcfc9"],
+  ["仕掛中", "#e6cff2"],
+  ["保留", "#c6dbe1"],
+  ["完了", "#d4edbc"],
+  ["機番重複", "#e8eaed"]
+]);
+
+const TANTOUSHA_COLORS = new Map([
+  ["志賀", "#ffcfc9"],
+  ["遠藤", "#d4edbc"],
+  ["小板橋", "#bfe1f6"]
+]);
+
+const TOIAWASE_COLORS = new Map([
+  ["問合済", "#ffcfc9"],
+  ["回答済", "#bfe1f6"]
+]);
+
+// =================================================================================
+// === シート列定義（ヘッダー名ベース） ===
+// =================================================================================
+/**
+ * ★★★ 要望を反映した最終的な列構成 ★★★
+ */
+const MAIN_SHEET_HEADERS = {
+  MGMT_NO: "管理No",
+  KIBAN: "機番",
+  MODEL: "機種",
+  KIBAN_URL: "機番(リンク)",
+  SERIES_URL: "STD資料(リンク)",
+  REFERENCE_KIBAN: "参考製番",
+  CIRCUIT_DIAGRAM_NO: "回路図番",
+  TOIAWASE: "問い合わせ",
+  TEMP_CODE: "仮コード",
+  TANTOUSHA: "担当者",
+  DESTINATION: "納入先",
+  PLANNED_HOURS_PANEL: "予定工数(盤配)",
+  ACTUAL_HOURS_PANEL: "実績工数(盤配)",
+  PLANNED_HOURS_WIRE: "予定工数(線加工)",
+  ACTUAL_HOURS_WIRE: "実績工数(線加工)",
+  PROGRESS_PANEL: "進捗(盤配)",
+  PROGRESS_WIRE: "進捗(線加工)",
+  START_DATE: "仕掛日",
+  COMPLETE_DATE: "完了日",
+  DRAWING_DEADLINE: "作図期限",
+  PROGRESS_EDITOR: "進捗記入者",
+  UPDATE_TS: "更新日時",
+  OVERRUN_REASON: "係り超過理由",
+  NOTES: "注意点",
+  REMARKS: "備考"
+};
+
+/**
+ * 工数シートの列定義（メインシートと完全に一致させる）
+ */
+const INPUT_SHEET_HEADERS = MAIN_SHEET_HEADERS;
+
+
+// =================================================================================
+// === ユーティリティ関数（Config内） ===
+// =================================================================================
+/**
+ * ヘッダー行から列インデックスを動的に取得
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - 対象シート
+ * @param {Object} headerDef - ヘッダー定義オブジェクト
+ * @return {Object} ヘッダー名をキー、列インデックスを値とするオブジェクト
+ */
+function getColumnIndices(sheet, headerDef) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `col_indices_${sheet.getId()}_${sheet.getName()}`;
+  const cached = cache.get(cacheKey);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch(e) {}
+  }
+
+  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const indices = {};
+  for (const [key, headerName] of Object.entries(headerDef)) {
+    const index = headerRow.indexOf(headerName) + 1;
+    if (index > 0) {
+      indices[key] = index;
+    } else {
+      Logger.log(`警告: ヘッダー "${headerName}" がシート "${sheet.getName()}" に見つかりません。`);
+    }
+  }
+
+  cache.put(cacheKey, JSON.stringify(indices), 21600); // 6時間キャッシュ
+  return indices;
+}
+
+/**
+ * 色を取得する汎用関数
+ */
+function getColor(colorMap, key) {
+  return colorMap.get(key) || CONFIG.COLORS.DEFAULT_BACKGROUND;
+}
+
+const DATE_FORMATS = {
+  DATE_ONLY: "yyyy/MM/dd",
+  DATETIME: "yyyy-MM-dd HH:mm",
+  MONTH_DAY: "M/d",
+  BACKUP_TIMESTAMP: "yyyy-MM-dd_HH-mm"
+};
+
+const BATCH_CONFIG = {
+  CACHE_EXPIRATION: 300 // 5分
+};/**
+ * Config.gs
+ * システム全体の設定定数を管理
  * 列の追加やステータスの追加に対応できる柔軟な設計
  */
 
@@ -260,4 +419,163 @@ const PROCESS_MESSAGES = {
   COMPLETE: "自動処理が完了しました。",
   UPDATE_COMPLETE: "更新が完了しました。",
   REBUILDING: "再構築中..."
+};/**
+ * Config.gs
+ * システム全体の設定定数を管理
+ */
+
+// =================================================================================
+// === グローバル設定 ===
+// =================================================================================
+const CONFIG = {
+  // Google DriveフォルダID
+  FOLDERS: {
+    REFERENCE_MATERIAL_PARENT: "124OR71hkr2jeT-5esv0GHAeZn83fAvYc",
+    SERIES_MODEL_PARENT: "1XdiYBWiixF_zOSScT7UKUhCQkye3MLNJ",
+    BACKUP_PARENT: "1HCDyjF_Kw2jlzN491uZK1X6QeXFuOWSl"
+  },
+
+  // シート名
+  SHEETS: {
+    MAIN: "メインシート",
+    INPUT_PREFIX: "工数_",
+    TANTOUSHA_MASTER: "担当者マスタ", // ★担当者マスタシートを定義
+  },
+
+  // 色設定
+  COLORS: {
+    DUPLICATE_HIGHLIGHT: '#e8eaed',
+    DEFAULT_BACKGROUND: '#ffffff',
+    WEEKEND_HOLIDAY: '#e8eaed'
+  },
+
+  // バックアップ設定
+  BACKUP: {
+    KEEP_COUNT: 5,
+    PREFIX: "【Backup】"
+  },
+
+  // 日本の祝日カレンダーID
+  HOLIDAY_CALENDAR_ID: 'ja.japanese#holiday@group.v.calendar.google.com',
+
+  // デフォルト値
+  DEFAULTS: {
+    PROGRESS: "未着手",
+    DUPLICATE_TEXT: "機番重複"
+  }
+};
+
+// =================================================================================
+// === 動的な色設定 ===
+// =================================================================================
+const PROGRESS_COLORS = new Map([
+  ["未着手", "#ffcfc9"],
+  ["仕掛中", "#e6cff2"],
+  ["保留", "#c6dbe1"],
+  ["完了", "#d4edbc"],
+  ["機番重複", "#e8eaed"]
+]);
+
+const TANTOUSHA_COLORS = new Map([
+  ["志賀", "#ffcfc9"],
+  ["遠藤", "#d4edbc"],
+  ["小板橋", "#bfe1f6"]
+]);
+
+const TOIAWASE_COLORS = new Map([
+  ["問合済", "#ffcfc9"],
+  ["回答済", "#bfe1f6"]
+]);
+
+// =================================================================================
+// === シート列定義（ヘッダー名ベース） ===
+// =================================================================================
+/**
+ * ★★★ 要望を反映した最終的な列構成 ★★★
+ */
+const MAIN_SHEET_HEADERS = {
+  MGMT_NO: "管理No",
+  KIBAN: "機番",
+  MODEL: "機種",
+  KIBAN_URL: "機番(リンク)",
+  SERIES_URL: "STD資料(リンク)",
+  REFERENCE_KIBAN: "参考製番",
+  CIRCUIT_DIAGRAM_NO: "回路図番",
+  TOIAWASE: "問い合わせ",
+  TEMP_CODE: "仮コード",
+  TANTOUSHA: "担当者",
+  DESTINATION: "納入先",
+  PLANNED_HOURS_PANEL: "予定工数(盤配)",
+  ACTUAL_HOURS_PANEL: "実績工数(盤配)",
+  PLANNED_HOURS_WIRE: "予定工数(線加工)",
+  ACTUAL_HOURS_WIRE: "実績工数(線加工)",
+  PROGRESS_PANEL: "進捗(盤配)",
+  PROGRESS_WIRE: "進捗(線加工)",
+  START_DATE: "仕掛日",
+  COMPLETE_DATE: "完了日",
+  DRAWING_DEADLINE: "作図期限",
+  PROGRESS_EDITOR: "進捗記入者",
+  UPDATE_TS: "更新日時",
+  OVERRUN_REASON: "係り超過理由",
+  NOTES: "注意点",
+  REMARKS: "備考"
+};
+
+/**
+ * 工数シートの列定義（メインシートと完全に一致させる）
+ */
+const INPUT_SHEET_HEADERS = MAIN_SHEET_HEADERS;
+
+
+// =================================================================================
+// === ユーティリティ関数（Config内） ===
+// =================================================================================
+/**
+ * ヘッダー行から列インデックスを動的に取得
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - 対象シート
+ * @param {Object} headerDef - ヘッダー定義オブジェクト
+ * @return {Object} ヘッダー名をキー、列インデックスを値とするオブジェクト
+ */
+function getColumnIndices(sheet, headerDef) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `col_indices_${sheet.getId()}_${sheet.getName()}`;
+  const cached = cache.get(cacheKey);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch(e) {}
+  }
+
+  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  const indices = {};
+  for (const [key, headerName] of Object.entries(headerDef)) {
+    const index = headerRow.indexOf(headerName) + 1;
+    if (index > 0) {
+      indices[key] = index;
+    } else {
+      Logger.log(`警告: ヘッダー "${headerName}" がシート "${sheet.getName()}" に見つかりません。`);
+    }
+  }
+
+  cache.put(cacheKey, JSON.stringify(indices), 21600); // 6時間キャッシュ
+  return indices;
+}
+
+/**
+ * 色を取得する汎用関数
+ */
+function getColor(colorMap, key) {
+  return colorMap.get(key) || CONFIG.COLORS.DEFAULT_BACKGROUND;
+}
+
+const DATE_FORMATS = {
+  DATE_ONLY: "yyyy/MM/dd",
+  DATETIME: "yyyy-MM-dd HH:mm",
+  MONTH_DAY: "M/d",
+  BACKUP_TIMESTAMP: "yyyy-MM-dd_HH-mm"
+};
+
+const BATCH_CONFIG = {
+  CACHE_EXPIRATION: 300 // 5分
 };

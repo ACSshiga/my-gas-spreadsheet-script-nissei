@@ -9,6 +9,161 @@
 // =================================================================================
 
 /**
+ * 日付を比較用の "YYYY-MM-DD" 形式の文字列に変換します。
+ * @param {Date} date - 変換する日付オブジェクト
+ * @return {string|null} - フォーマットされた文字列、または無効な日付の場合はnull
+ */
+function formatDateForComparison(date) {
+  if (!isValidDate(date)) return null;
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+/**
+ * 日本の祝日を取得し、Setとして返します。結果はキャッシュされます。
+ * @param {Date} startDate - 取得開始日
+ * @param {Date} endDate - 取得終了日
+ * @return {Set<string>} - 祝日の日付文字列 (YYYY-MM-DD) のセット
+ */
+function getJapaneseHolidays(startDate, endDate) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `holidays_${formatDateForComparison(startDate)}_${formatDateForComparison(endDate)}`;
+  const cached = cache.get(cacheKey);
+  
+  if (cached) {
+    return new Set(JSON.parse(cached));
+  }
+  
+  try {
+    const calendar = CalendarApp.getCalendarById(CONFIG.HOLIDAY_CALENDAR_ID);
+    if (!calendar) {
+      console.warn("祝日カレンダーが見つかりません。");
+      return new Set();
+    }
+    
+    const events = calendar.getEvents(startDate, endDate);
+    const holidays = events.map(e => formatDateForComparison(e.getStartTime())).filter(d => d);
+    const holidaySet = new Set(holidays);
+    
+    cache.put(cacheKey, JSON.stringify([...holidaySet]), BATCH_CONFIG.CACHE_EXPIRATION * 10); // 祝日は長めにキャッシュ
+    return holidaySet;
+  } catch (e) {
+    console.error("祝日取得エラー:", e);
+    return new Set();
+  }
+}
+
+/**
+ * 指定された日付が休日（土日または祝日）かどうかを判定します。
+ * @param {Date} date - 判定する日付
+ * @param {Set<string>} holidaySet - 事前に取得した祝日のセット
+ * @return {boolean} - 休日の場合はtrue
+ */
+function isHoliday(date, holidaySet) {
+  if (!isValidDate(date)) return false;
+  
+  const dayOfWeek = date.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) return true; // 0:日曜, 6:土曜
+  
+  if (holidaySet && holidaySet.has(formatDateForComparison(date))) return true;
+  
+  return false;
+}
+
+// =================================================================================
+// === 文字列処理ユーティリティ ===
+// =================================================================================
+
+/**
+ * 値を安全に文字列に変換し、前後の空白を削除します。
+ * @param {*} value - 変換する値
+ * @return {string} - トリムされた文字列
+ */
+function safeTrim(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+/**
+ * HYPERLINK関数で安全に使用できるよう、文字列内のダブルクォートをエスケープします。
+ * @param {string} str - エスケープする文字列
+ * @return {string} - エスケープされた文字列
+ */
+function escapeForHyperlink(str) {
+  return String(str).replace(/"/g, '""');
+}
+
+/**
+ * HYPERLINK関数の文字列を生成します。
+ * @param {string} url - リンク先のURL
+ * @param {string} displayText - 表示するテキスト
+ * @return {string} - HYPERLINK関数の文字列
+ */
+function createHyperlinkFormula(url, displayText) {
+  if (!url) return "";
+  const safeUrl = escapeForHyperlink(url);
+  const safeText = escapeForHyperlink(displayText || url);
+  return `=HYPERLINK("${safeUrl}", "${safeText}")`;
+}
+
+/**
+ * 機種名からシリーズ名を抽出します (例: "NEX140V-18E" -> "NEX140")。
+ * @param {string} modelString - 機種文字列
+ * @return {string|null} - 抽出されたシリーズ名、またはnull
+ */
+function extractSeriesPlusInitialNumber(modelString) {
+  if (!modelString || typeof modelString !== 'string') return null;
+  
+  const relevantModelString = modelString.toUpperCase().trim().replace(/^[^A-Z]+/, "");
+  if (!relevantModelString) return null;
+  
+  const match = relevantModelString.match(/^([A-Z]{2,})(\d+)/);
+  if (match) {
+    return match[1] + match[2];
+  }
+  return null;
+}
+
+// =================================================================================
+// === 数値・データ検証ユーティリティ ===
+// =================================================================================
+
+/**
+ * 値を数値に変換します。変換できない場合は0を返します。
+ * @param {*} value - 変換する値
+ * @return {number} - 変換後の数値
+ */
+function toNumber(value) {
+  const num = Number(value);
+  return isNaN(num) ? 0 : num;
+}
+
+/**
+ * 値が有効な日付オブジェクトであるか検証します。
+ * @param {*} value - 検証する値
+ * @return {boolean} - 有効な日付の場合はtrue
+ */
+function isValidDate(value) {
+  return value instanceof Date && !isNaN(value.getTime());
+}
+
+/**
+ * タイムスタンプ付きでLoggerにログを出力します。
+ * @param {string} message - ログメッセージ
+ */
+function logWithTimestamp(message) {
+  const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), DATE_FORMATS.DATETIME);
+  console.log(`[${timestamp}] ${message}`);
+}/**
+ * Utils.gs
+ * 汎用ユーティリティ関数
+ * システム全体で使用される共通関数を定義
+ */
+
+// =================================================================================
+// === 日付関連ユーティリティ ===
+// =================================================================================
+
+/**
  * 日付を比較用の文字列形式に変換
  * @param {Date} date - 変換する日付
  * @return {string|null} YYYY-MM-DD形式の文字列、無効な日付の場合はnull
