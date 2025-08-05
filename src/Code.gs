@@ -27,30 +27,23 @@ function onOpen(e) {
     .addSeparator()
     .addItem('全資料フォルダ作成', 'bulkCreateMaterialFolders')
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
-    .addSeparator() // ★★★ 追加 ★★★
-    .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache') // ★★★ 追加 ★★★
+    .addSeparator()
+    .addItem('重複チェックと色付けを再実行', 'runColorizeAllSheets') // ★★★ デバッグ用メニューを追加 ★★★
+    .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
     .addToUi();
   setupAllDataValidations();
   
-  // 初回開いた時に未着手の設定と色付け
   syncDefaultProgressToMain();
   colorizeAllSheets();
 }
 
-
-/**
- * ★★★ 修正箇所 ★★★
- * LockServiceを追加して、スクリプトによる連続編集の無限ループを防ぎます。
- */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
-  // 処理が重複しないようにロックをかける
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) { // 10秒待ってもロックが取れなければ終了
+  if (!lock.tryLock(10000)) {
     console.log('先行する処理が実行中のため、今回の編集イベントはスキップされました。');
     return;
   }
-
   try {
     const sheet = e.range.getSheet();
     const sheetName = sheet.getName();
@@ -60,23 +53,34 @@ function onEdit(e) {
       ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
       syncMainToAllInputSheets();
       syncDefaultProgressToMain();
-      colorizeAllSheets(); // 色付けと重複処理
+      colorizeAllSheets();
       ss.toast('同期処理が完了しました。', '完了', 3);
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
       ss.toast(`${sheetName}の変更を検出しました。集計処理を開始します...`, '集計中', 5);
       syncInputToMain(sheetName, e.range);
       syncDefaultProgressToMain();
-      colorizeAllSheets(); // 色付けと重複処理
+      colorizeAllSheets();
       ss.toast('集計処理が完了しました。', '完了', 3);
     }
   } catch (error) {
     Logger.log(error.stack);
     ss.toast(`エラーが発生しました: ${error.message}`, "エラー", 10);
   } finally {
-    // 処理が終了したら必ずロックを解放する
     lock.releaseLock();
   }
 }
+
+/**
+ * ★★★ デバッグ用関数を追加 ★★★
+ * メニューから色付け処理だけを実行するための関数です。
+ */
+function runColorizeAllSheets() {
+  SpreadsheetApp.getActiveSpreadsheet().toast('重複チェックと色付けを実行中...', '処理中', 5);
+  colorizeAllSheets();
+  SpreadsheetApp.getActiveSpreadsheet().toast('処理が完了しました。', '完了', 3);
+}
+
+// ... (以降の関数は変更ありません) ...
 
 // =================================================================================
 // === 工数シート表示切替機能 ===
@@ -145,7 +149,6 @@ function createPersonalView() {
   }
   
   viewSheet.autoResizeColumns(1, headers.length);
-  // Viewシートの色付け
   try {
     const viewSheetObj = {
       getSheet: () => viewSheet,
@@ -190,7 +193,6 @@ function setupAllDataValidations() {
     const mainSheetInstance = new MainSheet();
     const mainSheetObj = mainSheetInstance.getSheet(); 
     
-    // メインシートの入力規則を設定
     if (mainSheetObj.getLastRow() >= mainSheetInstance.startRow) {
       const mainLastRow = mainSheetObj.getMaxRows();
       const mainHeaderIndices = mainSheetInstance.indices;
@@ -209,13 +211,11 @@ function setupAllDataValidations() {
           }
         }
       }
-      // メインシートの進捗列は手動入力なので入力規則は不要
       if (mainHeaderIndices.PROGRESS) {
         mainSheetObj.getRange(mainSheetInstance.startRow, mainHeaderIndices.PROGRESS, mainLastRow - mainSheetInstance.startRow + 1).clearDataValidations();
       }
     }
 
-    // すべての「工数シート」に進捗の入力規則を設定します。
     const progressValues = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER).flat();
     if (progressValues.length > 0) {
       const progressRule = SpreadsheetApp.newDataValidation().requireValueInList(progressValues).setAllowInvalid(false).build();
@@ -227,7 +227,6 @@ function setupAllDataValidations() {
             const lastRow = sheet.getMaxRows();
             const progressCol = inputSheet.indices.PROGRESS;
 
-            // 列が存在し、データ開始行以降の行がある場合のみ設定
             if(progressCol && lastRow >= inputSheet.startRow) 
             {
               sheet.getRange(inputSheet.startRow, progressCol, lastRow - inputSheet.startRow + 1).setDataValidation(progressRule);
