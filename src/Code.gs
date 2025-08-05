@@ -12,6 +12,215 @@
  * スプレッドシートが開かれたときに実行される関数です。
  * カスタムメニューの作成と、前回のフィルタ状態の復元を行います。
  */
+function onOpen(e) {
+  const ui = SpreadsheetApp.getUi();
+
+  ui.createMenu('カスタムメニュー')
+    .addItem('自分の担当案件のみ表示', 'applyMyTasksFilter')
+    .addItem('すべての案件を表示', 'clearAllFilters')
+    .addSeparator()
+    .addItem('サイドバーを開く (フィルタ)', 'showFilterSidebar')
+    .addSeparator()
+    .addItem('全機番の資料フォルダ作成', 'bulkCreateKibanFolders')
+    .addItem('週次バックアップを作成', 'createWeeklyBackup')
+    .addToUi();
+
+  // 前回のフィルタ状態を復元
+  restoreLastFilter();
+  // 全マスタシートからデータ入力規則を更新
+  setupAllDataValidations();
+}
+
+/**
+ * スプレッドシートが編集されたときに実行される関数です。
+ * @param {GoogleAppsScript.Events.SheetsOnEdit} e - イベントオブジェクト
+ */
+function onEdit(e) {
+  if (!e || !e.source || !e.range) return;
+  const sheet = e.range.getSheet();
+  const sheetName = sheet.getName();
+  const ss = e.source;
+
+  try {
+    // メインシートが編集された場合
+    if (sheetName === CONFIG.SHEETS.MAIN) {
+      ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
+      syncMainToAllInputSheets();
+      ss.toast('同期処理が完了しました。', '完了', 3);
+    }
+    // 工数シートが編集された場合
+    else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+      ss.toast(`${sheetName}の変更を検出しました。集計処理を開始します...`, '集計中', 5);
+      syncInputToMain(sheetName, e.range);
+      ss.toast('集計処理が完了しました。', '完了', 3);
+    }
+  } catch (error) {
+    Logger.log(error.stack);
+    ss.toast(`エラーが発生しました: ${error.message}`, "エラー", 10);
+  }
+}
+
+// =================================================================================
+// === カスタムメニュー機能 ===
+// =================================================================================
+
+function applyMyTasksFilter() {
+  const userEmail = Session.getActiveUser().getEmail();
+  const tantoushaName = getTantoushaNameByEmail(userEmail);
+
+  if (tantoushaName) {
+    const filterSettings = { tantousha: [tantoushaName], progress: [] };
+    applySidebarFilters(filterSettings, true);
+    SpreadsheetApp.getActiveSpreadsheet().toast(`担当者: ${tantoushaName} で絞り込みました。`);
+  } else {
+    SpreadsheetApp.getUi().alert('あなたのメールアドレスが担当者マスタに見つかりません。');
+  }
+}
+
+function clearAllFilters() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
+  if (!sheet) return;
+
+  const filter = sheet.getFilter();
+  if (filter) {
+    filter.remove();
+  }
+  clearLastFilter();
+  SpreadsheetApp.getActiveSpreadsheet().toast('すべてのフィルタを解除しました。');
+}
+
+function showFilterSidebar() {
+  const html = HtmlService.createHtmlOutputFromFile('Sidebar.html')
+      .setTitle('パーソナルフィルタ')
+      .setWidth(300);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+// =================================================================================
+// === フィルタの内部処理 (個人用フィルタ表示) ===
+// =================================================================================
+
+/**
+ * サイドバーからの情報に基づき、個人用のフィルタ表示を適用します。
+ * @param {Object} filters - { tantousha: string[], progress: string[] }
+ * @param {boolean} [save=true] - フィルタ設定を記憶するかどうか
+ */
+function applySidebarFilters(filters, save = true) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
+  if (!sheet) return;
+
+  const indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
+  const criteriaMap = new Map();
+
+  // 担当者フィルタの条件を作成
+  if (filters.tantousha && filters.tantousha.length > 0) {
+    const tantoushaCriteria = SpreadsheetApp.newFilterCriteria()
+      .setHiddenValues(['']) // 空白は非表示
+      .setVisibleValues(filters.tantousha)
+      .build();
+    criteriaMap.set(indices.TANTOUSHA, tantoushaCriteria);
+  }
+
+  // 進捗フィルタの条件を作成
+  if (filters.progress && filters.progress.length > 0) {
+    const progressCriteria = SpreadsheetApp.newFilterCriteria()
+      .setHiddenValues(['']) // 空白は非表示
+      .setVisibleValues(filters.progress)
+      .build();
+    criteriaMap.set(indices.PROGRESS, progressCriteria);
+  }
+
+  // 既存のフィルタを一旦削除
+  let filter = sheet.getFilter();
+  if (filter) {
+    filter.remove();
+  }
+
+  // 新しいフィルタを作成して適用
+  filter = sheet.getDataRange().createFilter();
+  criteriaMap.forEach((criteria, colIndex) => {
+    filter.setColumnFilterCriteria(colIndex, criteria);
+  });
+
+  if (save) {
+    saveLastFilter(filters);
+  }
+}
+
+function saveLastFilter(filters) {
+  PropertiesService.getUserProperties().setProperty('lastFilter', JSON.stringify(filters));
+}
+
+function restoreLastFilter() {
+  const lastFilterJson = PropertiesService.getUserProperties().getProperty('lastFilter');
+  if (lastFilterJson) {
+    const lastFilter = JSON.parse(lastFilterJson);
+    applySidebarFilters(lastFilter, false); // 復元時は再保存しない
+    SpreadsheetApp.getActiveSpreadsheet().toast('前回のフィルタを復元しました。');
+  }
+}
+
+function clearLastFilter() {
+  PropertiesService.getUserProperties().deleteProperty('lastFilter');
+}
+
+// =================================================================================
+// === HTMLサービス連携 (サイドバー用) ===
+// =================================================================================
+
+/**
+ * サイドバーに表示するためのマスタ情報を取得して返します。
+ */
+function getFilterOptions() {
+  return {
+    tantousha: getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER, 1),
+    progress: getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER, 1)
+  };
+}
+
+
+// =================================================================================
+// === データ入力規則の自動設定 ===
+// =================================================================================
+/**
+ * 全マスタシートを読み込み、メインシートにドロップダウンリストを設定します。
+ */
+function setupAllDataValidations() {
+  const mainSheet = new MainSheet().getSheet();
+  const lastRow = mainSheet.getLastRow();
+  const headerIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
+  
+  // 各マスタと対応する列のマップ
+  const validationMap = {
+    [CONFIG.SHEETS.SAGYOU_KUBUN_MASTER]: headerIndices.SAGYOU_KUBUN,
+    [CONFIG.SHEETS.SHINCHOKU_MASTER]: headerIndices.PROGRESS,
+    [CONFIG.SHEETS.TOIAWASE_MASTER]: headerIndices.TOIAWASE,
+    [CONFIG.SHEETS.TANTOUSHA_MASTER]: headerIndices.TANTOUSHA,
+  };
+
+  for (const [masterName, colIndex] of Object.entries(validationMap)) {
+    if(colIndex) {
+      const masterValues = getMasterData(masterName, 1);
+      if (masterValues.length > 0) {
+        const rule = SpreadsheetApp.newDataValidation().requireValueInList(masterValues).build();
+        mainSheet.getRange(CONFIG.DATA_START_ROW.MAIN, colIndex, lastRow).setDataValidation(rule);
+      }
+    }
+  }
+}/**
+ * Code.gs
+ * イベントハンドラとカスタムメニューを管理する司令塔。
+ * スプレッドシートの操作をトリガーに、各機能を呼び出します。
+ */
+
+// =================================================================================
+// === イベントハンドラ (スプレッドシート操作時に自動実行) ===
+// =================================================================================
+
+/**
+ * スプレッドシートが開かれたときに実行される関数です。
+ * カスタムメニューの作成と、前回のフィルタ状態の復元を行います。
+ */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
