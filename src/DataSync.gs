@@ -29,13 +29,15 @@ function syncMainToAllInputSheets() {
       // メインシートから、その担当者の案件データのみをフィルタリング
       const tantoushaData = mainDataValues.filter(row => row[mainIndices.TANTOUSHA - 1] === tantousha.name);
 
+      // ★★★ ここからが修正箇所 ★★★
       // 工数シートに表示するためのデータに変換
       const dataForInputSheet = tantoushaData.map(row => {
         return [
           row[mainIndices.MGMT_NO - 1],
           row[mainIndices.SAGYOU_KUBUN - 1],
           row[mainIndices.KIBAN - 1],
-          row[mainIndices.PROGRESS - 1],
+          // メインシートの進捗が空欄の場合に「未着手」を自動で設定する
+          row[mainIndices.PROGRESS - 1] || "未着手", 
           row[mainIndices.PLANNED_HOURS - 1],
           // 実績工数合計列は数式なので空のまま
         ];
@@ -78,13 +80,11 @@ function syncInputToMain(inputSheetName, editedRange) {
   const mgmtNo = editedRowValues[inputIndices.MGMT_NO - 1];
   const sagyouKubun = editedRowValues[inputIndices.SAGYOU_KUBUN - 1];
   const uniqueKey = `${mgmtNo}_${sagyouKubun}`;
-
   const targetRowInfo = mainDataMap.get(uniqueKey);
   if (!targetRowInfo) return; // メインシートに対応する行がない場合は終了
 
   const valuesToUpdate = {};
   const editedCol = editedRange.getColumn();
-
   // 1. 進捗が変更された場合
   if (editedCol === inputIndices.PROGRESS) {
     const newProgress = editedRowValues[inputIndices.PROGRESS - 1];
@@ -111,11 +111,9 @@ function syncInputToMain(inputSheetName, editedRange) {
     totalHours = hoursValues.reduce((sum, h) => sum + toNumber(h), 0);
   }
   valuesToUpdate[mainIndices.ACTUAL_HOURS] = totalHours;
-
   // 3. 更新者と更新日時の記録
   valuesToUpdate[mainIndices.PROGRESS_EDITOR] = tantoushaName;
-  valuesToUpdate[mainIndices.UPDATE_TS] = new Date();
-
+  valuesToUpdate[main.indices.UPDATE_TS] = new Date();
   // 4. メインシートの対応する行を一度に更新
   const updateRange = mainSheet.sheet.getRange(targetRowInfo.rowNum, 1, 1, mainSheet.getLastColumn());
   const newRowData = updateRange.getValues()[0];
