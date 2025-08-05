@@ -135,12 +135,14 @@ function getMasterData(masterSheetName, numColumns = 1) {
 
 /**
 * メールアドレスから担当者マスタを検索し、対応する担当者名を返します。
+* ★メールアドレスの前後の空白を無視するように修正
 */
 function getTantoushaNameByEmail(email) {
   if (!email) return null;
+  const userEmail = email.trim(); // ★自分のメールアドレスの空白を削除
   const masterData = getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER, 2);
-  const user = masterData.find(row => row[1] === email); // 2列目(B列)がメールアドレス
-  return user ? user[0] : null; // 1列目(A列)の担当者名を返す
+  const user = masterData.find(row => String(row[1]).trim() === userEmail); // ★マスタ側の空白も削除して比較
+  return user ? user[0] : null;
 }
 
 /**
