@@ -105,7 +105,7 @@ const MAIN_SHEET_HEADERS = {
  * 工数シートの列定義
  */
 const INPUT_SHEET_HEADERS = {
-  MGMT_NO:      "管理No.",
+  MGMT_NO:      "管理No",
   SAGYOU_KUBUN: "作業区分",
   KIBAN:        "機番",
   PROGRESS:     "進捗",

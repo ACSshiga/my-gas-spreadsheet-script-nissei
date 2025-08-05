@@ -59,7 +59,7 @@ function updateBillingSheet(selectedMonth) {
 
     // シートの内容をクリアし、ヘッダーと新しいデータを書き込み
     billingSheet.clear();
-    const headers = ["管理No.", "委託業務内容", "作業区分", "予定工数", "実工数"];
+    const headers = ["管理No", "委託業務内容", "作業区分", "予定工数", "実工数"];
     billingSheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold");
 
     if (dataForBillingSheet.length > 0) {
