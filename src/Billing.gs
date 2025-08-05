@@ -29,6 +29,7 @@ function updateBillingSheet(selectedMonth) {
       mainSheet.getLastRow() - mainSheet.startRow + 1,
       mainSheet.getLastColumn()
     ).getValues();
+    
     // 選択された月に完了した案件のみをフィルタリング
     const [year, month] = selectedMonth.split('-').map(Number);
     const billingData = mainData.filter(row => {
@@ -38,16 +39,18 @@ function updateBillingSheet(selectedMonth) {
       }
       return false;
     });
+    
     // 請求シートに書き出すためのデータに整形
     const dataForBillingSheet = billingData.map(row => {
       return [
-        row[mainIndices.MGMT_NO - 1],          // 管理No.
-        row[mainIndices.KIBAN - 1],             // 委託業務内容 (機番)
-        row[mainIndices.SAGYOU_KUBUN - 1],      // 作業区分
-        row[mainIndices.PLANNED_HOURS - 1],     // 予定工数
-        row[mainIndices.ACTUAL_HOURS - 1]       // 実工数
+        row[mainIndices.MGMT_NO - 1],       // 管理No.
+        row[mainIndices.KIBAN - 1],          // 委託業務内容 (機番)
+        row[mainIndices.SAGYOU_KUBUN - 1],   // 作業区分
+        row[mainIndices.PLANNED_HOURS - 1],  // 予定工数
+        row[mainIndices.ACTUAL_HOURS - 1]    // 実工数
       ];
     });
+    
     // 請求シートを取得（なければ作成）
     let billingSheet = ss.getSheetByName(CONFIG.SHEETS.BILLING);
     if (!billingSheet) {
@@ -98,6 +101,7 @@ function getBillingMonthOptions() {
     mainSheet.startRow, mainIndices.COMPLETE_DATE,
     mainSheet.getLastRow() - mainSheet.startRow + 1, 1
   ).getValues();
+
   const monthSet = new Set();
   mainData.forEach(row => {
     const date = row[0];
@@ -107,6 +111,7 @@ function getBillingMonthOptions() {
       monthSet.add(`${year}-${String(month).padStart(2, '0')}`); // YYYY-MM 形式でセットに追加
     }
   });
+
   // セットから配列に変換し、降順にソート
   return Array.from(monthSet).sort().reverse().map(monthStr => {
       const [year, month] = monthStr.split('-');
