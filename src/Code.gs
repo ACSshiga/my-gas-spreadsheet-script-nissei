@@ -212,9 +212,15 @@ function checkMyEmail() {
 }
 
 /**
- * 【デバッグ用】スクリプトが記憶しているキャッシュをすべて強制的にクリアします。
+ * 【デバッグ用】スクリプトが記憶しているマスタシートのキャッシュをクリアします。
  */
 function clearCache() {
-  CacheService.getScriptCache().removeAll();
-  SpreadsheetApp.getUi().alert('スクリプトのキャッシュをクリアしました。');
+  const cache = CacheService.getScriptCache();
+  // 問題の原因となっている可能性のあるマスタのキャッシュキーを具体的に指定して削除
+  const keysToRemove = [
+    `master_${CONFIG.SHEETS.TANTOUSHA_MASTER}_2`,
+    `master_${CONFIG.SHEETS.TANTOUSHA_MASTER}_1`
+  ];
+  cache.removeAll(keysToRemove);
+  SpreadsheetApp.getUi().alert('マスタデータのキャッシュをクリアしました。');
 }
