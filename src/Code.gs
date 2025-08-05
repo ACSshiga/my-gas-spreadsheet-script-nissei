@@ -41,10 +41,12 @@ function onEdit(e) {
     if (sheetName === CONFIG.SHEETS.MAIN) {
       ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
       syncMainToAllInputSheets();
+      colorizeAllSheets(); // 色付け処理を追加
       ss.toast('同期処理が完了しました。', '完了', 3);
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
       ss.toast(`${sheetName}の変更を検出しました。集計処理を開始します...`, '集計中', 5);
       syncInputToMain(sheetName, e.range);
+      colorizeAllSheets(); // 色付け処理を追加
       ss.toast('集計処理が完了しました。', '完了', 3);
     }
   } catch (error) {
@@ -193,8 +195,6 @@ function setupAllDataValidations() {
 
             // 列が存在し、データ開始行以降の行がある場合のみ設定
             if(progressCol && lastRow >= inputSheet.startRow) {
-               // ★★★ ここが修正箇所 ★★★
-               // 'inputsheet' を 'inputSheet' に修正しました。
               sheet.getRange(inputSheet.startRow, progressCol, lastRow - inputSheet.startRow + 1).setDataValidation(progressRule);
             }
           } catch(e) {
