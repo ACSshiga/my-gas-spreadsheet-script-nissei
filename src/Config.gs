@@ -55,6 +55,7 @@ const PROGRESS_COLORS = new Map([
   ["仕掛中", "#e1bee7"],
   ["保留",   "#c5cae9"],
   ["完了",   "#c8e6c9"],
+  ["機番重複", "#cccccc"], // ★★★ 修正箇所 ★★★
 ]);
 
 const TANTOUSHA_COLORS = new Map([
@@ -67,7 +68,6 @@ const TOIAWASE_COLORS = new Map([
   ["問合済", "#ffecb3"],
   ["回答済", "#d1c4e9"],
 ]);
-
 
 // =================================================================================
 // === シート列定義（ヘッダー名ベース） ===
@@ -102,7 +102,6 @@ const MAIN_SHEET_HEADERS = {
 };
 
 /**
- * ★★★ 修正箇所 ★★★
  * 工数シートの列定義
  */
 const INPUT_SHEET_HEADERS = {
@@ -112,10 +111,9 @@ const INPUT_SHEET_HEADERS = {
   PROGRESS:     "進捗",
   PLANNED_HOURS:"予定工数",
   ACTUAL_HOURS_SUM: "実績工数合計",
-  SEPARATOR:    "", // ★G列の空白列を定義
+  SEPARATOR:    "", // G列の空白列を定義
   // H列以降は動的な日付列
 };
-
 
 // =================================================================================
 // === ユーティリティ関数（Config内） ===

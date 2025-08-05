@@ -25,8 +25,7 @@ function onOpen(e) {
   menu.addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
     .addSeparator()
-    // ★★★ 修正箇所 ★★★
-    .addItem('全資料フォルダ作成', 'bulkCreateMaterialFolders') // 呼び出す関数名を新しいものに変更
+    .addItem('全資料フォルダ作成', 'bulkCreateMaterialFolders')
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addToUi();
   setupAllDataValidations();
@@ -36,28 +35,45 @@ function onOpen(e) {
   colorizeAllSheets();
 }
 
+
+/**
+ * ★★★ 修正箇所 ★★★
+ * LockServiceを追加して、スクリプトによる連続編集の無限ループを防ぎます。
+ */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
-  const sheet = e.range.getSheet();
-  const sheetName = sheet.getName();
-  const ss = e.source;
+
+  // 処理が重複しないようにロックをかける
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) { // 10秒待ってもロックが取れなければ終了
+    console.log('先行する処理が実行中のため、今回の編集イベントはスキップされました。');
+    return;
+  }
+
   try {
+    const sheet = e.range.getSheet();
+    const sheetName = sheet.getName();
+    const ss = e.source;
+
     if (sheetName === CONFIG.SHEETS.MAIN) {
       ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
       syncMainToAllInputSheets();
-      syncDefaultProgressToMain(); // 未着手の同期
-      colorizeAllSheets(); // 色付け処理
+      syncDefaultProgressToMain();
+      colorizeAllSheets(); // 色付けと重複処理
       ss.toast('同期処理が完了しました。', '完了', 3);
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
       ss.toast(`${sheetName}の変更を検出しました。集計処理を開始します...`, '集計中', 5);
       syncInputToMain(sheetName, e.range);
-      syncDefaultProgressToMain(); // 未着手の同期
-      colorizeAllSheets(); // 色付け処理
+      syncDefaultProgressToMain();
+      colorizeAllSheets(); // 色付けと重複処理
       ss.toast('集計処理が完了しました。', '完了', 3);
     }
   } catch (error) {
     Logger.log(error.stack);
     ss.toast(`エラーが発生しました: ${error.message}`, "エラー", 10);
+  } finally {
+    // 処理が終了したら必ずロックを解放する
+    lock.releaseLock();
   }
 }
 
