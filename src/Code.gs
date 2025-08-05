@@ -202,3 +202,11 @@ function setupAllDataValidations() {
     }
   }
 }
+
+/**
+ * 【デバッグ用】現在操作しているユーザーのメールアドレスを確認します。
+ */
+function checkMyEmail() {
+  const userEmail = Session.getActiveUser().getEmail();
+  SpreadsheetApp.getUi().alert(`スクリプトが認識しているメールアドレスは以下です：\n\n${userEmail}`);
+}
