@@ -142,7 +142,7 @@ function setupAllDataValidations() {
       
       const mainValidationMap = {
         [CONFIG.SHEETS.SAGYOU_KUBUN_MASTER]: mainHeaderIndices.SAGYOU_KUBUN,
-        [CONFIG.SHEETS.SHINCHOKU_MASTER]: mainHeaderIndices.PROGRESS,
+        // [CONFIG.SHEETS.SHINCHOKU_MASTER]: mainHeaderIndices.PROGRESS, // ★メインシートの進捗ドロップダウンを削除
         [CONFIG.SHEETS.TOIAWASE_MASTER]: mainHeaderIndices.TOIAWASE,
         [CONFIG.SHEETS.TANTOUSHA_MASTER]: mainHeaderIndices.TANTOUSHA,
       };
@@ -155,6 +155,10 @@ function setupAllDataValidations() {
             mainSheetObj.getRange(mainSheet.startRow, colIndex, mainLastRow - mainSheet.startRow + 1).setDataValidation(rule);
           }
         }
+      }
+      // ★メインシートの進捗列の入力規則をクリア
+      if (mainHeaderIndices.PROGRESS) {
+        mainSheetObj.getRange(mainSheet.startRow, mainHeaderIndices.PROGRESS, mainLastRow - mainSheet.startRow + 1).clearDataValidations();
       }
     }
 
