@@ -111,6 +111,7 @@ class InputSheet extends SheetService {
       this.sheet.getRange(2, sumLabelCol).setValue("日次合計").setHorizontalAlignment("right");
     }
 
+    // G列から日付列を生成（前月と当月）
     const dateHeaders = [];
     const sumFormulas = [];
     const today = new Date();
@@ -137,15 +138,44 @@ class InputSheet extends SheetService {
       this.sheet.getRange(2, headers.length + 1, 1, sumFormulas.length).setFormulas([sumFormulas]);
     }
 
+    // ★★★ 修正箇所 ★★★
     this.sheet.setFrozenRows(2);
-    this.sheet.setFrozenColumns(3);
+    this.sheet.setFrozenColumns(6); // 固定列をF列（6列）までに変更
   }
   
   /**
    * 表示する日付列を、当月と前月のものだけにフィルタリングします。
    */
   filterDateColumns() {
-    // (変更なしのため省略)
+    const sheet = this.sheet;
+    const lastCol = sheet.getLastColumn();
+    const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
+
+    if (lastCol < dateStartCol) return;
+
+    sheet.showColumns(dateStartCol, lastCol - dateStartCol + 1); // 一旦すべて表示
+
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth(); // 0-indexed
+
+    const headerDates = sheet.getRange(1, dateStartCol, 1, lastCol - dateStartCol + 1).getValues()[0];
+    
+    headerDates.forEach((date, i) => {
+      if (isValidDate(date)) {
+        const dateYear = date.getFullYear();
+        const dateMonth = date.getMonth();
+        
+        const isCurrentMonth = (dateYear === currentYear && dateMonth === currentMonth);
+        const isPreviousMonth = (currentMonth === 0) 
+            ? (dateYear === currentYear - 1 && dateMonth === 11) 
+            : (dateYear === currentYear && dateMonth === currentMonth - 1);
+
+        if (!isCurrentMonth && !isPreviousMonth) {
+          sheet.hideColumns(dateStartCol + i);
+        }
+      }
+    });
   }
 
 
@@ -153,14 +183,24 @@ class InputSheet extends SheetService {
    * 工数シートの既存データをクリアします。
    */
   clearData() {
-    // (変更なしのため省略)
+    const lastRow = this.getLastRow();
+    if (lastRow >= this.startRow) {
+      this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, this.getLastColumn()).clearContent();
+    }
   }
 
   /**
    * 新しいデータを工数シートに書き込み、数式も設定します。
    */
   writeData(data) {
-    if (data.length === 0) return;
+    if (data.length === 0) {
+      // ★データがない場合もフィルタをクリアしておく
+      const existingFilter = this.sheet.getFilter();
+      if (existingFilter) {
+        existingFilter.remove();
+      }
+      return;
+    }
     
     // ★★★ 修正箇所 ★★★
     // 既存のフィルタがあれば一旦削除
@@ -182,7 +222,8 @@ class InputSheet extends SheetService {
     this.sheet.getRange(this.startRow, this.indices.ACTUAL_HOURS_SUM, data.length, 1).setFormulas(sumFormulas);
     
     // ★★★ 修正箇所 ★★★
-    // データ全体にフィルタを適用（これによりソート機能が使えるようになる）
-    this.sheet.getRange(this.startRow - 1, 1, this.sheet.getLastRow(), this.sheet.getLastColumn()).createFilter();
+    // ヘッダー行(1行目)を含めたデータ範囲全体にフィルタを適用
+    // これにより、ユーザーは1行目のヘッダーをクリックしてソートできるようになる
+    this.sheet.getRange(1, 1, this.sheet.getLastRow(), this.sheet.getLastColumn()).createFilter();
   }
 }
