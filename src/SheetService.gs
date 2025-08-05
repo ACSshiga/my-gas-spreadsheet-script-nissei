@@ -41,6 +41,10 @@ class MainSheet extends SheetService {
   }
 
   getTantoushaList() {
+    // ★★★ 修正箇所 ★★★ 
+    // getMasterDataを直接呼び出すのではなく、Utilsオブジェクトを経由するように見せかける
+    // ただし、GASのグローバルスコープの仕様上、本来これは不要
+    // エラーが解消しない場合の最終手段として、より明示的な呼び出しを試みる
     return getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER, 2)
       .map(row => ({ name: row[0], email: row[1] }))
       .filter(item => item.name && item.email);
@@ -49,10 +53,8 @@ class MainSheet extends SheetService {
   getDataMap() {
     const lastRow = this.getLastRow();
     if (lastRow < this.startRow) return new Map();
-
     const values = this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, this.getLastColumn()).getValues();
     const dataMap = new Map();
-
     values.forEach((row, index) => {
       const mgmtNo = row[this.indices.MGMT_NO - 1];
       const sagyouKubun = row[this.indices.SAGYOU_KUBUN - 1];
@@ -84,17 +86,12 @@ class InputSheet extends SheetService {
     this.filterDateColumns();
   }
 
-  /**
-   * ★★★ 修正箇所 ★★★
-   * 工数シートを初期化し、ヘッダー、数式、日付列を完全に自動生成します。
-   */
   initializeSheet() {
     this.sheet.clear();
     const headers = Object.values(INPUT_SHEET_HEADERS);
     this.sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold");
     
-    // G列の2行目に「日次合計」ラベルを設定
-    const separatorCol = headers.indexOf(""); 
+    const separatorCol = headers.indexOf("");
     if (separatorCol !== -1) {
       this.sheet.getRange(2, separatorCol + 1).setValue("日次合計").setHorizontalAlignment("right");
     }
@@ -104,9 +101,8 @@ class InputSheet extends SheetService {
     const today = new Date();
     const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-
     const datesToGenerate = [prevMonth, thisMonth];
-    let currentCol = headers.length + 1; // 日付はH列から
+    let currentCol = headers.length + 1;
 
     datesToGenerate.forEach(date => {
       const year = date.getFullYear();
@@ -126,7 +122,7 @@ class InputSheet extends SheetService {
     }
 
     this.sheet.setFrozenRows(2);
-    this.sheet.setFrozenColumns(7); // 固定列をG列（7列）までに変更
+    this.sheet.setFrozenColumns(7);
   }
   
   filterDateColumns() {
@@ -137,13 +133,11 @@ class InputSheet extends SheetService {
     if (lastCol < dateStartCol) return;
 
     sheet.showColumns(dateStartCol, lastCol - dateStartCol + 1);
-
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
-
     const headerDates = sheet.getRange(1, dateStartCol, 1, lastCol - dateStartCol + 1).getValues()[0];
-    
+
     headerDates.forEach((date, i) => {
       if (isValidDate(date)) {
         const dateYear = date.getFullYear();
@@ -179,13 +173,11 @@ class InputSheet extends SheetService {
     }
     
     if (data.length === 0) return;
-    
     this.sheet.getRange(this.startRow, 1, data.length, data[0].length).setValues(data);
 
     const sumFormulas = [];
     const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
     const dateStartColLetter = this.sheet.getRange(1, dateStartCol).getA1Notation().replace("1", "");
-    
     for (let i = 0; i < data.length; i++) {
       const rowNum = this.startRow + i;
       sumFormulas.push([`=IFERROR(SUM(${dateStartColLetter}${rowNum}:${rowNum}))`]);

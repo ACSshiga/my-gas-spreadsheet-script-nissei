@@ -28,7 +28,7 @@ function onOpen(e) {
     .addItem('全資料フォルダ作成', 'bulkCreateMaterialFolders')
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addSeparator()
-    .addItem('重複チェックと色付けを再実行', 'runColorizeAllSheets') // ★★★ デバッグ用メニューを追加 ★★★
+    .addItem('重複チェックと色付けを再実行', 'runColorizeAllSheets')
     .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
     .addToUi();
   setupAllDataValidations();
@@ -37,17 +37,26 @@ function onOpen(e) {
   colorizeAllSheets();
 }
 
+
+/**
+ * ★★★ 修正箇所 ★★★
+ * 変数ssの宣言をtryブロックの外に出し、catchブロックでも使えるように修正。
+ * これにより、エラー発生時にss is not definedというエラーが出るのを防ぎます。
+ */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
+
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) {
     console.log('先行する処理が実行中のため、今回の編集イベントはスキップされました。');
     return;
   }
+  
+  const ss = e.source; // ★★★ ssの宣言をここに移動 ★★★
+
   try {
     const sheet = e.range.getSheet();
     const sheetName = sheet.getName();
-    const ss = e.source;
 
     if (sheetName === CONFIG.SHEETS.MAIN) {
       ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
@@ -71,8 +80,7 @@ function onEdit(e) {
 }
 
 /**
- * ★★★ デバッグ用関数を追加 ★★★
- * メニューから色付け処理だけを実行するための関数です。
+ * デバッグ用：メニューから色付け処理だけを実行するための関数です。
  */
 function runColorizeAllSheets() {
   SpreadsheetApp.getActiveSpreadsheet().toast('重複チェックと色付けを実行中...', '処理中', 5);
@@ -80,7 +88,6 @@ function runColorizeAllSheets() {
   SpreadsheetApp.getActiveSpreadsheet().toast('処理が完了しました。', '完了', 3);
 }
 
-// ... (以降の関数は変更ありません) ...
 
 // =================================================================================
 // === 工数シート表示切替機能 ===
