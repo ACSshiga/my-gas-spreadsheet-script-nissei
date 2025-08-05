@@ -41,10 +41,6 @@ class MainSheet extends SheetService {
   }
 
   getTantoushaList() {
-    // ★★★ 修正箇所 ★★★ 
-    // getMasterDataを直接呼び出すのではなく、Utilsオブジェクトを経由するように見せかける
-    // ただし、GASのグローバルスコープの仕様上、本来これは不要
-    // エラーが解消しない場合の最終手段として、より明示的な呼び出しを試みる
     return getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER, 2)
       .map(row => ({ name: row[0], email: row[1] }))
       .filter(item => item.name && item.email);
@@ -103,7 +99,6 @@ class InputSheet extends SheetService {
     const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     const datesToGenerate = [prevMonth, thisMonth];
     let currentCol = headers.length + 1;
-
     datesToGenerate.forEach(date => {
       const year = date.getFullYear();
       const month = date.getMonth();
@@ -115,7 +110,6 @@ class InputSheet extends SheetService {
         currentCol++;
       }
     });
-    
     if (dateHeaders.length > 0) {
       this.sheet.getRange(1, headers.length + 1, 1, dateHeaders.length).setValues([dateHeaders]).setNumberFormat("M/d");
       this.sheet.getRange(2, headers.length + 1, 1, sumFormulas.length).setFormulas([sumFormulas]);
@@ -137,7 +131,6 @@ class InputSheet extends SheetService {
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth();
     const headerDates = sheet.getRange(1, dateStartCol, 1, lastCol - dateStartCol + 1).getValues()[0];
-
     headerDates.forEach((date, i) => {
       if (isValidDate(date)) {
         const dateYear = date.getFullYear();
@@ -155,6 +148,7 @@ class InputSheet extends SheetService {
     });
   }
 
+  // ▼▼▼ ここから修正 ▼▼▼
   clearData() {
     const existingFilter = this.sheet.getFilter();
     if (existingFilter) {
@@ -162,9 +156,11 @@ class InputSheet extends SheetService {
     }
     const lastRow = this.getLastRow();
     if (lastRow >= this.startRow) {
-      this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, this.getLastColumn()).clearContent();
+      // .clearContent() から .clear() に変更して、書式ごとクリアする
+      this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, this.getLastColumn()).clear();
     }
   }
+  // ▲▲▲ ここまで修正 ▲▲▲
 
   writeData(data) {
     const existingFilter = this.sheet.getFilter();
