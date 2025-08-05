@@ -25,7 +25,8 @@ function onOpen(e) {
   menu.addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
     .addSeparator()
-    .addItem('全機番の資料フォルダ作成', 'bulkCreateKibanFolders')
+    // ★★★ 修正箇所 ★★★
+    .addItem('全資料フォルダ作成', 'bulkCreateMaterialFolders') // 呼び出す関数名を新しいものに変更
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addToUi();
   setupAllDataValidations();
@@ -40,7 +41,6 @@ function onEdit(e) {
   const sheet = e.range.getSheet();
   const sheetName = sheet.getName();
   const ss = e.source;
-
   try {
     if (sheetName === CONFIG.SHEETS.MAIN) {
       ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
@@ -128,7 +128,6 @@ function createPersonalView() {
   }
   
   viewSheet.autoResizeColumns(1, headers.length);
-  
   // Viewシートの色付け
   try {
     const viewSheetObj = {
@@ -150,7 +149,6 @@ function removePersonalView(showMessage = true) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const userEmail = Session.getActiveUser().getEmail();
   const tantoushaName = getTantoushaNameByEmail(userEmail);
-  
   if (tantoushaName) {
     const viewSheetName = `View_${tantoushaName}`;
     const sheetToDelete = ss.getSheetByName(viewSheetName);
@@ -205,7 +203,6 @@ function setupAllDataValidations() {
     if (progressValues.length > 0) {
       const progressRule = SpreadsheetApp.newDataValidation().requireValueInList(progressValues).setAllowInvalid(false).build();
       const allSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
-
       allSheets.forEach(sheet => {
         if (sheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
           try {
@@ -214,7 +211,8 @@ function setupAllDataValidations() {
             const progressCol = inputSheet.indices.PROGRESS;
 
             // 列が存在し、データ開始行以降の行がある場合のみ設定
-            if(progressCol && lastRow >= inputSheet.startRow) {
+            if(progressCol && lastRow >= inputSheet.startRow) 
+            {
               sheet.getRange(inputSheet.startRow, progressCol, lastRow - inputSheet.startRow + 1).setDataValidation(progressRule);
             }
           } catch(e) {
