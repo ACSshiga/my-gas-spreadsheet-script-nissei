@@ -43,8 +43,9 @@ function colorizeAllSheets() {
 }
 
 /**
- * ★★★ 調査用コード ★★★
- * 詳細なログを出力して、重複検出の動作を確認します。
+ * ★★★ 最終版 ★★★
+ * 指定されたシートオブジェクトの各列をルールに基づき色付けします。
+ * 数式を保護しながら、重複行（同じ機番＋作業区分）の検出と処理を行います。
  */
 function colorizeSheet_(sheetObject) {
   const sheet = sheetObject.getSheet();
@@ -54,14 +55,17 @@ function colorizeSheet_(sheetObject) {
 
   if (lastRow < startRow) return;
 
-  Logger.log(`--- 色付け処理開始: ${sheet.getName()} ---`);
-
   const dataRows = lastRow - startRow + 1;
   const lastCol = sheet.getLastColumn();
   const fullRange = sheet.getRange(startRow, 1, dataRows, lastCol);
   
-  const values = fullRange.getValues();
+  // 数式を破壊しないよう、表示値と数式の両方を取得
+  const displayValues = fullRange.getDisplayValues();
+  const formulas = fullRange.getFormulas();
   const backgroundColors = fullRange.getBackgrounds();
+  
+  // シートに書き戻すための配列を準備
+  const outputValues = JSON.parse(JSON.stringify(displayValues));
 
   const mgmtNoCol = indices.MGMT_NO;
   const progressCol = indices.PROGRESS;
@@ -69,14 +73,13 @@ function colorizeSheet_(sheetObject) {
   const toiawaseCol = indices.TOIAWASE;
   const kibanCol = indices.KIBAN;
   const sagyouKubunCol = indices.SAGYOU_KUBUN;
-
   const DUPLICATE_COLOR = '#cccccc';
 
   const uniqueKeys = new Set();
   const restrictedRanges = [];
   const normalRanges = [];
 
-  values.forEach((row, i) => {
+  displayValues.forEach((row, i) => {
     let isDuplicate = false;
     if (kibanCol && sagyouKubunCol) {
       const kiban = safeTrim(row[kibanCol - 1]);
@@ -84,11 +87,8 @@ function colorizeSheet_(sheetObject) {
       
       if (kiban && sagyouKubun) {
         const uniqueKey = `${kiban}_${sagyouKubun}`;
-        Logger.log(`行 ${startRow + i}: チェック中のキー = "${uniqueKey}"`); // キーをログに出力
-
         if (uniqueKeys.has(uniqueKey)) {
           isDuplicate = true;
-          Logger.log(`行 ${startRow + i}: ★★★ 重複を検出しました ★★★`); // 重複検出をログに出力
         } else {
           uniqueKeys.add(uniqueKey);
         }
@@ -99,8 +99,8 @@ function colorizeSheet_(sheetObject) {
       for (let j = 0; j < lastCol; j++) {
         backgroundColors[i][j] = DUPLICATE_COLOR;
       }
-      if (progressCol) values[i][progressCol - 1] = "機番重複";
-      if (tantoushaCol) values[i][tantoushaCol - 1] = "";
+      if (progressCol) outputValues[i][progressCol - 1] = "機番重複";
+      if (tantoushaCol) outputValues[i][tantoushaCol - 1] = "";
       if (sheetObject instanceof MainSheet && tantoushaCol) {
         restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
       }
@@ -120,8 +120,17 @@ function colorizeSheet_(sheetObject) {
     }
   });
 
+  // 数式を復元する
+  formulas.forEach((row, i) => {
+    row.forEach((formula, j) => {
+      if (formula) {
+        outputValues[i][j] = formula;
+      }
+    });
+  });
+
   fullRange.setBackgrounds(backgroundColors);
-  fullRange.setValues(values);
+  fullRange.setValues(outputValues);
 
   if (sheetObject instanceof MainSheet) {
     if (restrictedRanges.length > 0) {
@@ -129,40 +138,3 @@ function colorizeSheet_(sheetObject) {
         .requireValueInRange(sheet.getRange('A1:A1'), false)
         .setAllowInvalid(false)
         .setHelpText('この行は機番が重複しているため、担当者は設定できません。')
-        .build();
-      restrictedRanges.forEach(range => range.setDataValidation(restrictedRule));
-    }
-    if (normalRanges.length > 0) {
-      const masterValues = getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER).flat();
-      if (masterValues.length > 0) {
-        const normalRule = SpreadsheetApp.newDataValidation()
-          .requireValueInList(masterValues)
-          .setAllowInvalid(false)
-          .build();
-        normalRanges.forEach(range => range.setDataValidation(normalRule));
-      }
-    }
-  }
-  Logger.log(`--- 色付け処理終了: ${sheet.getName()} ---`);
-}
-
-function colorizeHolidayColumns_(inputSheetObject) {
-  // ... (この関数の内容は変更ありません)
-  const sheet = inputSheetObject.getSheet();
-  const lastCol = sheet.getLastColumn();
-  const dateColumnStart = Object.keys(INPUT_SHEET_HEADERS).length + 1;
-  if (lastCol < dateColumnStart) return;
-  const year = new Date().getFullYear();
-  const holidays = getJapaneseHolidays(year);
-  const nextYearHolidays = getJapaneseHolidays(year + 1);
-  nextYearHolidays.forEach(h => holidays.add(h));
-  const headerRange = sheet.getRange(1, dateColumnStart, 1, lastCol - dateColumnStart + 1);
-  const headerDates = headerRange.getValues()[0];
-  for (let i = 0; i < headerDates.length; i++) {
-    const currentCol = dateColumnStart + i;
-    const date = headerDates[i];
-    const color = (isValidDate(date) && isHoliday(date, holidays)) ? CONFIG.COLORS.WEEKEND_HOLIDAY : CONFIG.COLORS.DEFAULT_BACKGROUND;
-    const colBackgrounds = Array(sheet.getMaxRows()).fill([color]);
-    sheet.getRange(1, currentCol, sheet.getMaxRows()).setBackgrounds(colBackgrounds);
-  }
-}

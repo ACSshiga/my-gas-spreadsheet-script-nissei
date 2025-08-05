@@ -55,7 +55,7 @@ const PROGRESS_COLORS = new Map([
   ["仕掛中", "#e1bee7"],
   ["保留",   "#c5cae9"],
   ["完了",   "#c8e6c9"],
-  ["機番重複", "#cccccc"], // ★★★ 修正箇所 ★★★
+  ["機番重複", "#cccccc"], // この行が追加されています
 ]);
 
 const TANTOUSHA_COLORS = new Map([
