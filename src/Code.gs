@@ -68,19 +68,20 @@ function createPersonalView() {
   
   const headers = mainData[0];
   const personalData = mainData.filter((row, index) => {
-    // ヘッダー行は保持し、データ行は担当者名でフィルタリング
     return index === 0 || row[mainIndices.TANTOUSHA - 1] === tantoushaName;
   });
 
   // 既存の個人用シートがあれば削除
   removePersonalView();
 
-  // 新しい個人用シートを作成してデータを書き込み
   const viewSheetName = `View_${tantoushaName}`;
-  const viewSheet = ss.insertSheet(viewSheetName, 0); // 先頭にシートを作成
+  const viewSheet = ss.insertSheet(viewSheetName, 0);
   viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
   
-  viewSheet.createFilter(); // 作成したシートに通常のフィルタを適用
+  // ★★★ エラー修正箇所 ★★★
+  // シート全体ではなく、データ範囲(getDataRange())に対してフィルタを作成します。
+  viewSheet.getDataRange().createFilter(); 
+  
   viewSheet.autoResizeColumns(1, headers.length);
   viewSheet.activate();
   
@@ -111,29 +112,30 @@ function removePersonalView() {
 // === データ入力規則の自動設定 ===
 // =================================================================================
 function setupAllDataValidations() {
-  const mainSheet = new MainSheet().getSheet();
-  if (mainSheet.getLastRow() < CONFIG.DATA_START_ROW.MAIN) return;
-  
-  const lastRow = mainSheet.getMaxRows();
-  const headerIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
-  
-  const validationMap = {
-    [CONFIG.SHEETS.SAGYOU_KUBUN_MASTER]: headerIndices.SAGYOU_KUBUN,
-    [CONFIG.SHEETS.SHINCHOKU_MASTER]: headerIndices.PROGRESS,
-    [CONFIG.SHEETS.TOIAWASE_MASTER]: headerIndices.TOIAWASE,
-    [CONFIG.SHEETS.TANTOUSHA_MASTER]: headerIndices.TANTOUSHA,
-  };
+  try {
+    const mainSheet = new MainSheet().getSheet();
+    if (mainSheet.getLastRow() < CONFIG.DATA_START_ROW.MAIN) return;
+    
+    const lastRow = mainSheet.getMaxRows();
+    const headerIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
+    
+    const validationMap = {
+      [CONFIG.SHEETS.SAGYOU_KUBUN_MASTER]: headerIndices.SAGYOU_KUBUN,
+      [CONFIG.SHEETS.SHINCHOKU_MASTER]: headerIndices.PROGRESS,
+      [CONFIG.SHEETS.TOIAWASE_MASTER]: headerIndices.TOIAWASE,
+      [CONFIG.SHEETS.TANTOUSHA_MASTER]: headerIndices.TANTOUSHA,
+    };
 
-  for (const [masterName, colIndex] of Object.entries(validationMap)) {
-    if(colIndex) {
-      const masterValues = getMasterData(masterName).flat(); // 1次元配列に変換
-      if (masterValues.length > 0) {
-        const rule = SpreadsheetApp.newDataValidation().requireValueInList(masterValues).setAllowInvalid(false).build();
-        mainSheet.getRange(CONFIG.DATA_START_ROW.MAIN, colIndex, lastRow - CONFIG.DATA_START_ROW.MAIN + 1).setDataValidation(rule);
+    for (const [masterName, colIndex] of Object.entries(validationMap)) {
+      if(colIndex) {
+        const masterValues = getMasterData(masterName).flat();
+        if (masterValues.length > 0) {
+          const rule = SpreadsheetApp.newDataValidation().requireValueInList(masterValues).setAllowInvalid(false).build();
+          mainSheet.getRange(CONFIG.DATA_START_ROW.MAIN, colIndex, lastRow - CONFIG.DATA_START_ROW.MAIN + 1).setDataValidation(rule);
+        }
       }
     }
+  } catch(e) {
+    Logger.log(`データ入力規則の設定中にエラー: ${e.message}`);
   }
 }
-
-// (サイドバー関連の関数は、この新しい方式では不要になるため削除しました)
-// (請求シート、Drive連携、バックアップの関数は別ファイルにあるため、ここでは呼び出しのみ)
