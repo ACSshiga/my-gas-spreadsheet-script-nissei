@@ -27,6 +27,26 @@ function colorizeAllSheets() {
         // シートが存在しない場合はスキップ
       }
     });
+    
+    // Viewシートの色付けを追加
+    const allSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+    allSheets.forEach(sheet => {
+      if (sheet.getName().startsWith('View_')) {
+        try {
+          // Viewシート用の一時的なMainSheetオブジェクトを作成
+          const viewSheetObj = {
+            getSheet: () => sheet,
+            indices: getColumnIndices(sheet, MAIN_SHEET_HEADERS),
+            startRow: 2,
+            getLastRow: () => sheet.getLastRow()
+          };
+          colorizeSheet_(viewSheetObj);
+        } catch (e) {
+          Logger.log(`Viewシート ${sheet.getName()} の色付けエラー: ${e.message}`);
+        }
+      }
+    });
+    
     logWithTimestamp("全シートの色付け処理が完了しました。");
   } catch (error) {
     Logger.log(`色付け処理でエラーが発生しました: ${error.stack}`);
