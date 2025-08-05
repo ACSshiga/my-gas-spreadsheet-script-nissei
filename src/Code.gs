@@ -1,7 +1,7 @@
 /**
  * Code.gs
  * イベントハンドラとカスタムメニューを管理する司令塔。
- * ★★★ Coloring.gs の内容を統合 ★★★
+ * ★★★ Coloring.gs の内容を統合済み ★★★
  */
 
 // =================================================================================
@@ -35,7 +35,7 @@ function onOpen(e) {
   setupAllDataValidations();
   
   syncDefaultProgressToMain();
-  colorizeAllSheets(); // この関数が同じファイル内にあればエラーにならない
+  colorizeAllSheets();
 }
 
 
@@ -73,9 +73,6 @@ function onEdit(e) {
   }
 }
 
-/**
- * デバッグ用：メニューから色付け処理だけを実行するための関数です。
- */
 function runColorizeAllSheets() {
   SpreadsheetApp.getActiveSpreadsheet().toast('重複チェックと色付けを実行中...', '処理中', 5);
   colorizeAllSheets();
@@ -244,20 +241,16 @@ function setupAllDataValidations() {
 }
 
 // =================================================================================
-// === ★★★ ここから下は元々 Coloring.gs にあったコード ★★★
+// === 色付け処理 (旧Coloring.gs) ===
 // =================================================================================
-
-/**
- * Coloring.gs
- * シートの自動色付けに関する機能を管理します。
- */
 
 function colorizeAllSheets() {
   try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
     const mainSheet = new MainSheet();
     colorizeSheet_(mainSheet);
 
-    const allSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+    const allSheets = ss.getSheets();
     allSheets.forEach(sheet => {
       const sheetName = sheet.getName();
       if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
@@ -335,8 +328,7 @@ function colorizeSheet_(sheetObject) {
       }
       if (progressCol) outputValues[i][progressCol - 1] = "機番重複";
       if (tantoushaCol) outputValues[i][tantoushaCol - 1] = "";
-      if (sheetObject 
- instanceof MainSheet && tantoushaCol) {
+      if (sheetObject instanceof MainSheet && tantoushaCol) {
         restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
       }
     } else {
@@ -350,6 +342,15 @@ function colorizeSheet_(sheetObject) {
         backgroundColors[i][progressCol - 1] = progressColor;
         if (mgmtNoCol) backgroundColors[i][mgmtNoCol - 1] = progressColor;
       }
+
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      // ★★★ ここが「作業区分」の色付けをしている部分です ★★★
+      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+      if (sagyouKubunCol) {
+        const sagyouKubunColor = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]));
+        backgroundColors[i][sagyouKubunCol - 1] = sagyouKubunColor;
+      }
+
       if (sheetObject instanceof MainSheet || sheet.getName().startsWith('View_')) {
         if (tantoushaCol) backgroundColors[i][tantoushaCol - 1] = getColor(TANTOUSHA_COLORS, safeTrim(row[tantoushaCol - 1]));
         if (toiawaseCol) backgroundColors[i][toiawaseCol - 1] = getColor(TOIAWASE_COLORS, safeTrim(row[toiawaseCol - 1]));
@@ -391,28 +392,5 @@ function colorizeSheet_(sheetObject) {
          normalRanges.forEach(range => range.clearDataValidations());
       }
     }
-  }
-}
-
-/**
- * 工数シートの土日・祝日の日付列に背景色を設定します。
- */
-function colorizeHolidayColumns_(inputSheetObject) {
-  const sheet = inputSheetObject.getSheet();
-  const lastCol = sheet.getLastColumn();
-  const dateColumnStart = Object.keys(INPUT_SHEET_HEADERS).length + 1;
-  if (lastCol < dateColumnStart) return;
-  const year = new Date().getFullYear();
-  const holidays = getJapaneseHolidays(year);
-  const nextYearHolidays = getJapaneseHolidays(year + 1);
-  nextYearHolidays.forEach(h => holidays.add(h));
-  const headerRange = sheet.getRange(1, dateColumnStart, 1, lastCol - dateColumnStart + 1);
-  const headerDates = headerRange.getValues()[0];
-  for (let i = 0; i < headerDates.length; i++) {
-    const currentCol = dateColumnStart + i;
-    const date = headerDates[i];
-    const color = (isValidDate(date) && isHoliday(date, holidays)) ? CONFIG.COLORS.WEEKEND_HOLIDAY : CONFIG.COLORS.DEFAULT_BACKGROUND;
-    const colBackgrounds = Array(sheet.getMaxRows()).fill([color]);
-    sheet.getRange(1, currentCol, sheet.getMaxRows()).setBackgrounds(colBackgrounds);
   }
 }
