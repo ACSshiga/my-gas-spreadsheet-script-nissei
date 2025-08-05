@@ -16,21 +16,18 @@ function bulkCreateKibanFolders() {
     const mainSheet = new MainSheet();
     const sheet = mainSheet.getSheet();
     const indices = mainSheet.indices;
-
     if (!indices.KIBAN || !indices.KIBAN_URL) {
       throw new Error("「機番」または「機番(リンク)」列が見つかりません。");
     }
 
     const lastRow = mainSheet.getLastRow();
     if (lastRow < mainSheet.startRow) return;
-
     const range = sheet.getRange(mainSheet.startRow, 1, lastRow - mainSheet.startRow + 1, mainSheet.getLastColumn());
     const values = range.getValues();
     const formulas = range.getFormulasR1C1();
 
     // 重複する機番でフォルダが複数作成されるのを防ぐため、処理済みの機番を記録
     const processedKiban = new Set();
-
     values.forEach((row, i) => {
       const kiban = String(row[indices.KIBAN - 1]).trim();
       
@@ -45,9 +42,15 @@ function bulkCreateKibanFolders() {
       }
     });
 
-    range.setFormulasR1C1(formulas);
-    ss.toast("機番フォルダの作成とリンク設定が完了しました。");
+    // ★★★ 修正箇所 ★★★
+    // E列（機番(リンク)列）の数式のみを更新し、他の列に影響を与えないようにします。
+    const kibanUrlColumn = indices.KIBAN_URL;
+    const formulasForKibanUrl = values.map((row, i) => [formulas[i][kibanUrlColumn - 1]]);
+    
+    sheet.getRange(mainSheet.startRow, kibanUrlColumn, formulasForKibanUrl.length, 1).setFormulasR1C1(formulasForKibanUrl);
+    // ★★★ 修正ここまで ★★★
 
+    ss.toast("機番フォルダの作成とリンク設定が完了しました。");
   } catch (error) {
     Logger.log(error.stack);
     ss.toast(`エラー: ${error.message}`);
