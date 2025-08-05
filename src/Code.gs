@@ -13,13 +13,11 @@ function onOpen(e) {
   const menu = ui.createMenu('カスタムメニュー');
   const activeSheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   
-  // メインシート用のメニュー
   if (activeSheet.getName() === CONFIG.SHEETS.MAIN || activeSheet.getName().startsWith('View_')) {
     menu.addItem('自分の担当案件のみ表示', 'createPersonalView');
     menu.addItem('表示を更新', 'refreshPersonalView') 
     menu.addItem('フィルタ表示を終了', 'removePersonalView');
   } 
-  // 工数シート用のメニュー
   else if (activeSheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
     menu.addItem('すべての月を表示', 'showAllDateColumns');
     menu.addItem('表示を当月・前月に戻す', 'hideOldDateColumns');
@@ -160,14 +158,36 @@ function removePersonalView(showMessage = true) {
 // =================================================================================
 function setupAllDataValidations() {
   try {
-    const mainSheet = new MainSheet();
-    const mainSheetObj = mainSheet.getSheet();
-    if (mainSheetObj.getLastRow() >= mainSheet.startRow) {
-      // (メインシートの処理は変更なし)
+    // ★★★ エラー修正箇所 ★★★
+    // `new MainSheet()`で生成したインスタンスからシートオブジェクトを取得する
+    const mainSheetInstance = new MainSheet();
+    const mainSheetObj = mainSheetInstance.getSheet(); 
+    
+    if (mainSheetObj.getLastRow() >= mainSheetInstance.startRow) {
+      const mainLastRow = mainSheetObj.getMaxRows();
+      const mainHeaderIndices = mainSheetInstance.indices;
+      
+      const mainValidationMap = {
+        [CONFIG.SHEETS.SAGYOU_KUBUN_MASTER]: mainHeaderIndices.SAGYOU_KUBUN,
+        [CONFIG.SHEETS.TOIAWASE_MASTER]: mainHeaderIndices.TOIAWASE,
+        [CONFIG.SHEETS.TANTOUSHA_MASTER]: mainHeaderIndices.TANTOUSHA,
+      };
+
+      for (const [masterName, colIndex] of Object.entries(mainValidationMap)) {
+        if(colIndex) {
+          const masterValues = getMasterData(masterName).flat();
+          if (masterValues.length > 0) {
+            const rule = SpreadsheetApp.newDataValidation().requireValueInList(masterValues).setAllowInvalid(false).build();
+            mainSheetObj.getRange(mainSheetInstance.startRow, colIndex, mainLastRow - mainSheetInstance.startRow + 1).setDataValidation(rule);
+          }
+        }
+      }
+
+      if (mainHeaderIndices.PROGRESS) {
+        mainSheetObj.getRange(mainSheetInstance.startRow, mainHeaderIndices.PROGRESS, mainLastRow - mainSheetInstance.startRow + 1).clearDataValidations();
+      }
     }
 
-    // ★★★ 修正箇所 ★★★
-    // すべての工数シートにドロップダウンを設定する
     const progressValues = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER).flat();
     if (progressValues.length === 0) return;
 

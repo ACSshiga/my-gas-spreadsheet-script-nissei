@@ -131,16 +131,13 @@ function getColumnIndices(sheet, headerDef) {
   if (cached) {
     try {
       return JSON.parse(cached);
-    } catch(e) {
-      // キャッシュが無効な場合は再取得
-    }
+    } catch(e) { /* ignore */ }
   }
 
   const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const indices = {};
   for (const [key, headerName] of Object.entries(headerDef)) {
-    // 空白ヘッダーも許容するように修正
-    const index = headerRow.findIndex(h => h === headerName) + 1;
+    const index = headerRow.indexOf(headerName) + 1;
     if (index > 0) {
       indices[key] = index;
     }

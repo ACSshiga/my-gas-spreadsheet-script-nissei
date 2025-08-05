@@ -7,7 +7,26 @@
 // === すべてのシートクラスの基盤となる抽象クラス ===
 // =================================================================================
 class SheetService {
-  // (変更なしのため省略)
+  /**
+   * @param {string} sheetName 操作対象のシート名
+   */
+  constructor(sheetName) {
+    if (this.constructor === SheetService) {
+      throw new Error("SheetServiceは抽象クラスのためインスタンス化できません。");
+    }
+    this.ss = SpreadsheetApp.getActiveSpreadsheet();
+    this.sheet = this.ss.getSheetByName(sheetName);
+    if (!this.sheet) {
+      this.sheet = this.ss.insertSheet(sheetName);
+    }
+    this.sheetName = sheetName;
+    this.startRow = 2;
+  }
+
+  getSheet() { return this.sheet; }
+  getLastRow() { return this.sheet.getLastRow(); }
+  getLastColumn() { return this.sheet.getLastColumn(); }
+  getName() { return this.sheetName; }
 }
 
 
@@ -15,7 +34,35 @@ class SheetService {
 // === メインシートを操作するためのクラス ===
 // =================================================================================
 class MainSheet extends SheetService {
-  // (変更なしのため省略)
+  constructor() {
+    super(CONFIG.SHEETS.MAIN);
+    this.startRow = CONFIG.DATA_START_ROW.MAIN;
+    this.indices = getColumnIndices(this.sheet, MAIN_SHEET_HEADERS);
+  }
+
+  getTantoushaList() {
+    return getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER, 2)
+      .map(row => ({ name: row[0], email: row[1] }))
+      .filter(item => item.name && item.email);
+  }
+
+  getDataMap() {
+    const lastRow = this.getLastRow();
+    if (lastRow < this.startRow) return new Map();
+
+    const values = this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, this.getLastColumn()).getValues();
+    const dataMap = new Map();
+
+    values.forEach((row, index) => {
+      const mgmtNo = row[this.indices.MGMT_NO - 1];
+      const sagyouKubun = row[this.indices.SAGYOU_KUBUN - 1];
+      if (mgmtNo && sagyouKubun) {
+        const uniqueKey = `${mgmtNo}_${sagyouKubun}`;
+        dataMap.set(uniqueKey, { data: row, rowNum: this.startRow + index });
+      }
+    });
+    return dataMap;
+  }
 }
 
 
@@ -37,14 +84,19 @@ class InputSheet extends SheetService {
     this.filterDateColumns();
   }
 
+  /**
+   * ★★★ 修正箇所 ★★★
+   * 工数シートを初期化し、ヘッダー、数式、日付列を完全に自動生成します。
+   */
   initializeSheet() {
     this.sheet.clear();
     const headers = Object.values(INPUT_SHEET_HEADERS);
     this.sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold");
     
-    const sumLabelCol = headers.indexOf("実績工数合計");
-    if (sumLabelCol > 0) {
-      this.sheet.getRange(2, sumLabelCol).setValue("日次合計").setHorizontalAlignment("right");
+    // G列の2行目に「日次合計」ラベルを設定
+    const separatorCol = headers.indexOf(""); 
+    if (separatorCol !== -1) {
+      this.sheet.getRange(2, separatorCol + 1).setValue("日次合計").setHorizontalAlignment("right");
     }
 
     const dateHeaders = [];
@@ -54,7 +106,7 @@ class InputSheet extends SheetService {
     const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
     const datesToGenerate = [prevMonth, thisMonth];
-    let currentCol = headers.length + 1;
+    let currentCol = headers.length + 1; // 日付はH列から
 
     datesToGenerate.forEach(date => {
       const year = date.getFullYear();
@@ -74,15 +126,50 @@ class InputSheet extends SheetService {
     }
 
     this.sheet.setFrozenRows(2);
-    this.sheet.setFrozenColumns(6); // ★固定列をF列（6列）までに変更
+    this.sheet.setFrozenColumns(7); // 固定列をG列（7列）までに変更
   }
   
   filterDateColumns() {
-    // (変更なしのため省略)
+    const sheet = this.sheet;
+    const lastCol = sheet.getLastColumn();
+    const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
+
+    if (lastCol < dateStartCol) return;
+
+    sheet.showColumns(dateStartCol, lastCol - dateStartCol + 1);
+
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+
+    const headerDates = sheet.getRange(1, dateStartCol, 1, lastCol - dateStartCol + 1).getValues()[0];
+    
+    headerDates.forEach((date, i) => {
+      if (isValidDate(date)) {
+        const dateYear = date.getFullYear();
+        const dateMonth = date.getMonth();
+        
+        const isCurrentMonth = (dateYear === currentYear && dateMonth === currentMonth);
+        const isPreviousMonth = (currentMonth === 0) 
+            ? (dateYear === currentYear - 1 && dateMonth === 11) 
+            : (dateYear === currentYear && dateMonth === currentMonth - 1);
+
+        if (!isCurrentMonth && !isPreviousMonth) {
+          sheet.hideColumns(dateStartCol + i);
+        }
+      }
+    });
   }
 
   clearData() {
-    // (変更なしのため省略)
+    const existingFilter = this.sheet.getFilter();
+    if (existingFilter) {
+      existingFilter.remove();
+    }
+    const lastRow = this.getLastRow();
+    if (lastRow >= this.startRow) {
+      this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, this.getLastColumn()).clearContent();
+    }
   }
 
   writeData(data) {
@@ -105,8 +192,6 @@ class InputSheet extends SheetService {
     }
     this.sheet.getRange(this.startRow, this.indices.ACTUAL_HOURS_SUM, data.length, 1).setFormulas(sumFormulas);
     
-    // ★★★ 修正箇所 ★★★
-    // ヘッダー行(1行目)からデータ最終行までを範囲としてフィルタを作成
     if(this.sheet.getLastRow() > 1) {
       this.sheet.getRange(1, 1, this.sheet.getLastRow(), this.sheet.getLastColumn()).createFilter();
     }
