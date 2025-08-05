@@ -241,3 +241,49 @@ function setupAllDataValidations() {
     Logger.log(`データ入力規則の設定中にエラー: ${e.message}`);
   }
 }
+
+/**
+ * ★★★ 調査専用の関数 ★★★
+ * メインシートと工数シートのヘッダーが正しく認識されているかを確認します。
+ */
+function checkHeaderNames() {
+  Logger.log("===== ヘッダー名の調査を開始します =====");
+  try {
+    // --- メインシートのチェック ---
+    Logger.log("\n--- メインシートのヘッダー情報をチェック中... ---");
+    const mainSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
+    if (mainSheet) {
+      const mainHeaders = mainSheet.getRange(1, 1, 1, mainSheet.getLastColumn()).getValues()[0];
+      Logger.log("実際にシートから読み取ったヘッダー名:");
+      Logger.log(mainHeaders);
+      
+      const mainIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
+      Logger.log("スクリプトが認識した列番号:");
+      Logger.log(`機番 (KIBAN): ${mainIndices.KIBAN || '見つかりません'}`);
+      Logger.log(`作業区分 (SAGYOU_KUBUN): ${mainIndices.SAGYOU_KUBUN || '見つかりません'}`);
+    } else {
+      Logger.log("メインシートが見つかりませんでした。");
+    }
+
+    // --- 工数シートのチェック ---
+    Logger.log("\n--- 工数シート（志賀）のヘッダー情報をチェック中... ---");
+    const inputSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.INPUT_PREFIX + "志賀");
+    if (inputSheet) {
+        const inputHeaders = inputSheet.getRange(1, 1, 1, inputSheet.getLastColumn()).getValues()[0];
+        Logger.log("実際にシートから読み取ったヘッダー名:");
+        Logger.log(inputHeaders);
+
+        const inputIndices = getColumnIndices(inputSheet, INPUT_SHEET_HEADERS);
+        Logger.log("スクリプトが認識した列番号:");
+        Logger.log(`機番 (KIBAN): ${inputIndices.KIBAN || '見つかりません'}`);
+        Logger.log(`作業区分 (SAGYOU_KUBUN): ${inputIndices.SAGYOU_KUBUN || '見つかりません'}`);
+    } else {
+        Logger.log("「工数_志賀」シートが見つかりませんでした。");
+    }
+
+  } catch (e) {
+    Logger.log(`調査中にエラーが発生しました: ${e.message}`);
+  } finally {
+    Logger.log("\n===== ヘッダー名の調査を終了します =====");
+  }
+}
