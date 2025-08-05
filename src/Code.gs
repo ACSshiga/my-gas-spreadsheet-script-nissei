@@ -1,58 +1,42 @@
 /**
  * Code.gs
  * イベントハンドラとカスタムメニューを管理する司令塔。
- * スプレッドシートの操作をトリガーに、各機能を呼び出します。
+ * ★個人用の仮想シートを作成する方式に全面修正
  */
 
 // =================================================================================
-// === イベントハンドラ (スプレッドシート操作時に自動実行) ===
+// === イベントハンドラ ===
 // =================================================================================
 
-/**
- * スプレッドシートが開かれたときに実行される関数です。
- */
 function onOpen(e) {
-  const ui = SpreadsheetApp.getUi();
-
-  ui.createMenu('カスタムメニュー')
-    .addItem('自分の担当案件のみ表示', 'applyMyTasksFilter')
-    .addItem('すべてのフィルタを解除', 'clearAllFilters')
-    .addSeparator()
-    .addItem('サイドバーを開く (フィルタ)', 'showFilterSidebar')
+  SpreadsheetApp.getUi().createMenu('カスタムメニュー')
+    .addItem('自分の担当案件のみ表示', 'createPersonalView')
+    .addItem('フィルタ表示を終了', 'removePersonalView')
     .addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
     .addSeparator()
     .addItem('全機番の資料フォルダ作成', 'bulkCreateKibanFolders')
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addToUi();
-
-  // 前回のフィルタ状態を復元
-  restoreLastFilter();
-  // 全マスタシートからデータ入力規則を更新
+  
   setupAllDataValidations();
 }
 
-/**
- * スプレッドシートが編集されたときに実行される関数です。
- * @param {GoogleAppsScript.Events.SheetsOnEdit} e - イベントオブジェクト
- */
 function onEdit(e) {
+  // (DataSync.gsに処理が実装されているため、ここのロジックは変更なし)
   if (!e || !e.source || !e.range) return;
   const sheet = e.range.getSheet();
   const sheetName = sheet.getName();
   const ss = e.source;
 
   try {
-    // メインシートが編集された場合
     if (sheetName === CONFIG.SHEETS.MAIN) {
       ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
-      syncMainToAllInputSheets(); // DataSync.gsの関数を呼び出し
+      syncMainToAllInputSheets();
       ss.toast('同期処理が完了しました。', '完了', 3);
-    }
-    // 工数シートが編集された場合
-    else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+    } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
       ss.toast(`${sheetName}の変更を検出しました。集計処理を開始します...`, '集計中', 5);
-      syncInputToMain(sheetName, e.range); // DataSync.gsの関数を呼び出し
+      syncInputToMain(sheetName, e.range);
       ss.toast('集計処理が完了しました。', '完了', 3);
     }
   } catch (error) {
@@ -62,117 +46,66 @@ function onEdit(e) {
 }
 
 // =================================================================================
-// === カスタムメニュー機能 ===
-// =================================================================================
-
-function applyMyTasksFilter() {
-  const userEmail = Session.getActiveUser().getEmail();
-  const tantoushaName = getTantoushaNameByEmail(userEmail);
-
-  if (tantoushaName) {
-    const filterSettings = { tantousha: [tantoushaName], progress: [] };
-    applySidebarFilters(filterSettings, true);
-    SpreadsheetApp.getActiveSpreadsheet().toast(`担当者: ${tantoushaName} で絞り込みました。`);
-  } else {
-    SpreadsheetApp.getUi().alert('あなたのメールアドレスが担当者マスタに見つかりません。');
-  }
-}
-
-function clearAllFilters() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
-  if (!sheet) return;
-
-  const userEmail = Session.getActiveUser().getEmail();
-  
-  // ★エラー修正：既存のフィルタ表示を正しく探して削除する
-  try {
-    const filterViews = sheet.getFilterViews();
-    for (let i = 0; i < filterViews.length; i++) {
-      if (filterViews[i].getName() === `FilterView-${userEmail}`) {
-        filterViews[i].remove();
-        break; // 見つけたらループを抜ける
-      }
-    }
-  } catch (e) {
-    Logger.log(`フィルタ表示のクリア中にエラー: ${e.message}`);
-    // ユーザーに影響がないように、エラーはログに記録するだけ
-  }
-
-  clearLastFilter();
-  SpreadsheetApp.getActiveSpreadsheet().toast('個人用のフィルタを解除しました。');
-}
-
-function showFilterSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('Sidebar.html')
-      .setTitle('パーソナルフィルタ')
-      .setWidth(300);
-  SpreadsheetApp.getUi().showSidebar(html);
-}
-
-// =================================================================================
-// === フィルタの内部処理 (【重要】個人用フィルタ表示) ===
+// === ★個人用ビュー（仮想シート）機能 ===
 // =================================================================================
 
 /**
- * サイドバーからの情報に基づき、個人用のフィルタ表示を適用します。
+ * 現在のユーザー専用のビューシートを作成します。
  */
-function applySidebarFilters(filters, save = true) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
-  if (!sheet) return;
-
+function createPersonalView() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const userEmail = Session.getActiveUser().getEmail();
-  const indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
+  const tantoushaName = getTantoushaNameByEmail(userEmail);
+
+  if (!tantoushaName) {
+    SpreadsheetApp.getUi().alert('あなたのメールアドレスが担当者マスタに見つかりません。');
+    return;
+  }
+
+  const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
+  const mainIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
+  const mainData = mainSheet.getDataRange().getValues();
   
-  // ★エラー修正：既存の個人用フィルタ表示を一度削除する
-  clearAllFilters();
+  const headers = mainData[0];
+  const personalData = mainData.filter((row, index) => {
+    // ヘッダー行は保持し、データ行は担当者名でフィルタリング
+    return index === 0 || row[mainIndices.TANTOUSHA - 1] === tantoushaName;
+  });
 
-  // 新しいフィルタ表示を作成
-  const filterView = sheet.createFilterView();
-  filterView.setName(`FilterView-${userEmail}`);
+  // 既存の個人用シートがあれば削除
+  removePersonalView();
+
+  // 新しい個人用シートを作成してデータを書き込み
+  const viewSheetName = `View_${tantoushaName}`;
+  const viewSheet = ss.insertSheet(viewSheetName, 0); // 先頭にシートを作成
+  viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
   
-  // 新しいフィルタ条件を設定
-  // 担当者
-  if (filters.tantousha && filters.tantousha.length > 0 && indices.TANTOUSHA) {
-    const criteria = SpreadsheetApp.newFilterCriteria().setVisibleValues(filters.tantousha).build();
-    filterView.setColumnFilterCriteria(indices.TANTOUSHA, criteria);
+  viewSheet.createFilter(); // 作成したシートに通常のフィルタを適用
+  viewSheet.autoResizeColumns(1, headers.length);
+  viewSheet.activate();
+  
+  SpreadsheetApp.getActiveSpreadsheet().toast(`${tantoushaName}さん専用の表示を作成しました。`);
+}
+
+/**
+ * ユーザー専用のビューシートを削除します。
+ */
+function removePersonalView() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const userEmail = Session.getActiveUser().getEmail();
+  const tantoushaName = getTantoushaNameByEmail(userEmail);
+  
+  if (tantoushaName) {
+    const viewSheetName = `View_${tantoushaName}`;
+    const sheetToDelete = ss.getSheetByName(viewSheetName);
+    if (sheetToDelete) {
+      ss.deleteSheet(sheetToDelete);
+    }
   }
-  // 進捗
-  if (filters.progress && filters.progress.length > 0 && indices.PROGRESS) {
-    const criteria = SpreadsheetApp.newFilterCriteria().setVisibleValues(filters.progress).build();
-    filterView.setColumnFilterCriteria(indices.PROGRESS, criteria);
-  }
-
-  if (save) {
-    saveLastFilter(filters);
-  }
+  // メインシートをアクティブに戻す
+  ss.getSheetByName(CONFIG.SHEETS.MAIN).activate();
 }
 
-function saveLastFilter(filters) {
-  PropertiesService.getUserProperties().setProperty('lastFilter', JSON.stringify(filters));
-}
-
-function restoreLastFilter() {
-  const lastFilterJson = PropertiesService.getUserProperties().getProperty('lastFilter');
-  if (lastFilterJson) {
-    const lastFilter = JSON.parse(lastFilterJson);
-    applySidebarFilters(lastFilter, false); // 復元時は再保存しない
-  }
-}
-
-function clearLastFilter() {
-  PropertiesService.getUserProperties().deleteProperty('lastFilter');
-}
-
-// =================================================================================
-// === HTMLサービス連携 (サイドバー用) ===
-// =================================================================================
-
-function getFilterOptions() {
-  return {
-    tantousha: getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER),
-    progress: getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER)
-  };
-}
 
 // =================================================================================
 // === データ入力規則の自動設定 ===
@@ -201,3 +134,6 @@ function setupAllDataValidations() {
     }
   }
 }
+
+// (サイドバー関連の関数は、この新しい方式では不要になるため削除しました)
+// (請求シート、Drive連携、バックアップの関数は別ファイルにあるため、ここでは呼び出しのみ)
