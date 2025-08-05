@@ -35,8 +35,7 @@ function syncMainToAllInputSheets() {
           row[mainIndices.MGMT_NO - 1],
           row[mainIndices.SAGYOU_KUBUN - 1],
           row[mainIndices.KIBAN - 1],
-          // メインシートの進捗が空欄の場合に「未着手」を自動で設定する
-          row[mainIndices.PROGRESS - 1] || "未着手", 
+          row[mainIndices.PROGRESS - 1] || "",  // 空のままにする
           row[mainIndices.PLANNED_HOURS - 1],
           // 実績工数合計列は数式なので空のまま
         ];
@@ -113,7 +112,6 @@ function syncInputToMain(inputSheetName, editedRange) {
   
   // 3. 更新者と更新日時の記録
   valuesToUpdate[mainIndices.PROGRESS_EDITOR] = tantoushaName;
-  // ★★★ ここが修正箇所 ★★★
   valuesToUpdate[mainSheet.indices.UPDATE_TS] = new Date();
   
   // 4. メインシートの対応する行を一度に更新
@@ -123,4 +121,39 @@ function syncInputToMain(inputSheetName, editedRange) {
     newRowData[colIndex - 1] = value;
   }
   updateRange.setValues([newRowData]);
+}
+
+/**
+ * 工数シートの「未着手」をメインシートに反映する関数
+ */
+function syncDefaultProgressToMain() {
+  const mainSheet = new MainSheet();
+  const lastRow = mainSheet.getLastRow();
+  if (lastRow < mainSheet.startRow) return;
+  
+  const mainData = mainSheet.sheet.getRange(
+    mainSheet.startRow, 1,
+    lastRow - mainSheet.startRow + 1,
+    mainSheet.getLastColumn()
+  ).getValues();
+  
+  const updates = [];
+  mainData.forEach((row, index) => {
+    const progress = row[mainSheet.indices.PROGRESS - 1];
+    const tantousha = row[mainSheet.indices.TANTOUSHA - 1];
+    
+    // 進捗が空欄で担当者がいる場合、「未着手」を設定
+    if (!progress && tantousha) {
+      updates.push({
+        row: mainSheet.startRow + index,
+        col: mainSheet.indices.PROGRESS,
+        value: "未着手"
+      });
+    }
+  });
+  
+  // バッチで更新
+  updates.forEach(update => {
+    mainSheet.sheet.getRange(update.row, update.col).setValue(update.value);
+  });
 }

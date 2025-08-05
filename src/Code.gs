@@ -29,6 +29,9 @@ function onOpen(e) {
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addToUi();
   setupAllDataValidations();
+  
+  // 初回開いた時に未着手の設定
+  syncDefaultProgressToMain();
 }
 
 function onEdit(e) {
@@ -41,12 +44,14 @@ function onEdit(e) {
     if (sheetName === CONFIG.SHEETS.MAIN) {
       ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
       syncMainToAllInputSheets();
-      colorizeAllSheets(); // 色付け処理を追加
+      syncDefaultProgressToMain(); // 未着手の同期
+      colorizeAllSheets(); // 色付け処理
       ss.toast('同期処理が完了しました。', '完了', 3);
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
       ss.toast(`${sheetName}の変更を検出しました。集計処理を開始します...`, '集計中', 5);
       syncInputToMain(sheetName, e.range);
-      colorizeAllSheets(); // 色付け処理を追加
+      syncDefaultProgressToMain(); // 未着手の同期
+      colorizeAllSheets(); // 色付け処理
       ss.toast('集計処理が完了しました。', '完了', 3);
     }
   } catch (error) {
@@ -122,6 +127,20 @@ function createPersonalView() {
   }
   
   viewSheet.autoResizeColumns(1, headers.length);
+  
+  // Viewシートの色付け
+  try {
+    const viewSheetObj = {
+      getSheet: () => viewSheet,
+      indices: mainIndices,
+      startRow: 2,
+      getLastRow: () => viewSheet.getLastRow()
+    };
+    colorizeSheet_(viewSheetObj);
+  } catch (e) {
+    Logger.log(`Viewシートの色付けエラー: ${e.message}`);
+  }
+  
   viewSheet.activate();
   ss.toast(`${tantoushaName}さん専用の表示を作成しました。`, '完了', 3);
 }
