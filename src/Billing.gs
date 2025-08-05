@@ -79,8 +79,6 @@ function updateBillingSheet(selectedMonth) {
  * 請求用のサイドバーを表示します。
  */
 function showBillingSidebar() {
-  // ★★★ ここが修正箇所 ★★★
-  // 'BillingSidebar.html' から '.html' を削除しました。
   const html = HtmlService.createHtmlOutputFromFile('BillingSidebar')
       .setTitle('請求月を選択')
       .setWidth(300);
