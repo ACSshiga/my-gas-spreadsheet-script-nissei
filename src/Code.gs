@@ -11,6 +11,7 @@
 function onOpen(e) {
   SpreadsheetApp.getUi().createMenu('カスタムメニュー')
     .addItem('自分の担当案件のみ表示', 'createPersonalView')
+    .addItem('表示を更新', 'refreshPersonalView') // ★更新ボタンを追加
     .addItem('フィルタ表示を終了', 'removePersonalView')
     .addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
@@ -50,6 +51,16 @@ function onEdit(e) {
 // =================================================================================
 
 /**
+ * ★表示を更新するための関数（削除と作成を連続実行）
+ */
+function refreshPersonalView() {
+  SpreadsheetApp.getActiveSpreadsheet().toast('表示を更新しています...', '処理中', 5);
+  removePersonalView(false); // メッセージなしで削除
+  createPersonalView();
+}
+
+
+/**
  * 現在のユーザー専用のビューシートを作成します。
  */
 function createPersonalView() {
@@ -72,26 +83,25 @@ function createPersonalView() {
   });
 
   // 既存の個人用シートがあれば削除
-  removePersonalView();
+  removePersonalView(false); // メッセージなしで削除
 
   const viewSheetName = `View_${tantoushaName}`;
   const viewSheet = ss.insertSheet(viewSheetName, 0);
   viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
   
-  // ★★★ エラー修正箇所 ★★★
-  // シート全体ではなく、データ範囲(getDataRange())に対してフィルタを作成します。
   viewSheet.getDataRange().createFilter(); 
   
   viewSheet.autoResizeColumns(1, headers.length);
   viewSheet.activate();
   
-  SpreadsheetApp.getActiveSpreadsheet().toast(`${tantoushaName}さん専用の表示を作成しました。`);
+  ss.toast(`${tantoushaName}さん専用の表示を作成しました。`, '完了', 3);
 }
 
 /**
  * ユーザー専用のビューシートを削除します。
+ * @param {boolean} [showMessage=true] - 完了メッセージを表示するかどうか
  */
-function removePersonalView() {
+function removePersonalView(showMessage = true) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const userEmail = Session.getActiveUser().getEmail();
   const tantoushaName = getTantoushaNameByEmail(userEmail);
@@ -104,7 +114,12 @@ function removePersonalView() {
     }
   }
   // メインシートをアクティブに戻す
-  ss.getSheetByName(CONFIG.SHEETS.MAIN).activate();
+  const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN)
+  if(mainSheet) mainSheet.activate();
+  
+  if (showMessage) {
+    ss.toast('フィルタ表示を終了しました。', '完了', 3);
+  }
 }
 
 
