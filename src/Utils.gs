@@ -1,7 +1,6 @@
 /**
  * Utils.gs
  * 汎用ユーティリティ関数を定義します。
- * システム全体で使用される共通の補助関数です。
  */
 
 // =================================================================================
@@ -16,7 +15,6 @@ function getJapaneseHolidays(year) {
   const cache = CacheService.getScriptCache();
   const cacheKey = `holidays_${year}`;
   const cached = cache.get(cacheKey);
-
   if (cached) {
     return new Set(JSON.parse(cached));
   }
@@ -30,7 +28,7 @@ function getJapaneseHolidays(year) {
     const endDate = new Date(year, 11, 31);
     const events = calendar.getEvents(startDate, endDate);
     const holidays = new Set(events.map(e => formatDateForComparison(e.getStartTime())));
-    cache.put(cacheKey, JSON.stringify([...holidays]), 21600);
+    cache.put(cacheKey, JSON.stringify([...holidays]), 21600); // 6時間キャッシュ
     return holidays;
   } catch (e) {
     console.error("祝日取得エラー:", e);
@@ -41,7 +39,7 @@ function getJapaneseHolidays(year) {
 function isHoliday(date, holidaySet) {
   if (!isValidDate(date)) return false;
   const dayOfWeek = date.getDay();
-  if (dayOfWeek === 0 || dayOfWeek === 6) return true;
+  if (dayOfWeek === 0 || dayOfWeek === 6) return true; // 土日
   return holidaySet.has(formatDateForComparison(date));
 }
 
@@ -82,13 +80,15 @@ function getMasterData(masterSheetName, numColumns = 1) {
       return JSON.parse(cached);
     } catch (e) { /* ignore */ }
   }
+
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(masterSheetName);
   if (!sheet) return [];
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
+
   const values = sheet.getRange(2, 1, lastRow - 1, numColumns).getValues();
   const filteredValues = values.filter(row => row[0] !== "");
-  cache.put(cacheKey, JSON.stringify(filteredValues), 3600);
+  cache.put(cacheKey, JSON.stringify(filteredValues), 3600); // 1時間キャッシュ
   return filteredValues;
 }
 
@@ -108,14 +108,10 @@ function logWithTimestamp(message) {
 // =================================================================================
 // === キャッシュクリア機能 ===
 // =================================================================================
-/**
- * スクリプトが使用するすべてのキャッシュを削除します。
- * カスタムメニューから実行できます。
- */
 function clearScriptCache() {
   try {
-    const cache = CacheService.getScriptCache(); // ★★★ 修正箇所 ★★★
-    cache.removeAll();                         // ★★★ 修正箇所 ★★★
+    const cache = CacheService.getScriptCache();
+    cache.removeAll();
     SpreadsheetApp.getActiveSpreadsheet().toast('スクリプトのキャッシュをクリアしました。', '完了', 3);
     logWithTimestamp("スクリプトのキャッシュがクリアされました。");
   } catch (e) {
