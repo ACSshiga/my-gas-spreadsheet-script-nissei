@@ -13,7 +13,11 @@
  */
 function syncMainToAllInputSheets() {
   const mainSheet = new MainSheet();
-  const mainData = mainSheet.sheet.getRange(mainSheet.startRow, 1, mainSheet.getLastRow() - mainSheet.startRow + 1, mainSheet.getLastColumn()).getValues();
+  const mainDataValues = mainSheet.sheet.getRange(
+    mainSheet.startRow, 1, 
+    mainSheet.getLastRow() - mainSheet.startRow + 1, 
+    mainSheet.getLastColumn()
+  ).getValues();
   const mainIndices = mainSheet.indices;
 
   const tantoushaList = mainSheet.getTantoushaList();
@@ -21,10 +25,9 @@ function syncMainToAllInputSheets() {
   tantoushaList.forEach(tantousha => {
     try {
       const inputSheet = new InputSheet(tantousha.name);
-      const inputIndices = inputSheet.indices;
 
-      // 担当者自身の案件データのみをフィルタリング
-      const tantoushaData = mainData.filter(row => row[mainIndices.TANTOUSHA - 1] === tantousha.name);
+      // メインシートから、その担当者の案件データのみをフィルタリング
+      const tantoushaData = mainDataValues.filter(row => row[mainIndices.TANTOUSHA - 1] === tantousha.name);
 
       // 工数シートに表示するためのデータに変換
       const dataForInputSheet = tantoushaData.map(row => {
@@ -34,7 +37,7 @@ function syncMainToAllInputSheets() {
           row[mainIndices.KIBAN - 1],
           row[mainIndices.PROGRESS - 1],
           row[mainIndices.PLANNED_HOURS - 1],
-          // 実績工数合計列は数式なので空にしておく
+          // 実績工数合計列は数式なので空のまま
         ];
       });
 
@@ -45,6 +48,7 @@ function syncMainToAllInputSheets() {
       }
     } catch (e) {
       // 担当者の工数シートが存在しない場合は何もしない
+      Logger.log(`${tantousha.name} の工数シートが見つかりませんでした: ${e.message}`);
     }
   });
 }
@@ -79,41 +83,40 @@ function syncInputToMain(inputSheetName, editedRange) {
   if (!targetRowInfo) return; // メインシートに対応する行がない場合は終了
 
   const valuesToUpdate = {};
+  const editedCol = editedRange.getColumn();
 
-  // 1. 進捗の同期
-  const newProgress = editedRowValues[inputIndices.PROGRESS - 1];
-  valuesToUpdate[mainIndices.PROGRESS] = newProgress;
-
-  // 2. 実績工数の集計
-  const dateHeaderRange = inputSheet.sheet.getRange(1, Object.keys(INPUT_SHEET_HEADERS).length + 1, 1, inputSheet.getLastColumn());
-  const dateValues = dateHeaderRange.getValues()[0];
-  let totalHours = 0;
-  dateValues.forEach((date, i) => {
-    if (isValidDate(date)) {
-      const colIndex = Object.keys(INPUT_SHEET_HEADERS).length + 1 + i;
-      const hours = toNumber(editedRowValues[colIndex - 1]);
-      totalHours += hours;
+  // 1. 進捗が変更された場合
+  if (editedCol === inputIndices.PROGRESS) {
+    const newProgress = editedRowValues[inputIndices.PROGRESS - 1];
+    valuesToUpdate[mainIndices.PROGRESS] = newProgress;
+    
+    // 仕掛日と完了日の自動記録
+    const mainRowData = targetRowInfo.data;
+    const currentStartDate = mainRowData[mainIndices.START_DATE - 1];
+    if (!isValidDate(currentStartDate) && newProgress !== '未着手') {
+      valuesToUpdate[mainIndices.START_DATE] = new Date();
     }
-  });
+    if (newProgress === '完了') {
+       valuesToUpdate[mainIndices.COMPLETE_DATE] = new Date();
+    } else {
+       valuesToUpdate[mainIndices.COMPLETE_DATE] = ''; // 完了でなくなった場合は完了日をクリア
+    }
+  }
+
+  // 2. 実績工数の集計 (進捗変更時も工数変更時も、常に再計算)
+  let totalHours = 0;
+  const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
+  if (inputSheet.getLastColumn() >= dateStartCol) {
+    const hoursValues = inputSheet.sheet.getRange(editedRow, dateStartCol, 1, inputSheet.getLastColumn() - dateStartCol + 1).getValues()[0];
+    totalHours = hoursValues.reduce((sum, h) => sum + toNumber(h), 0);
+  }
   valuesToUpdate[mainIndices.ACTUAL_HOURS] = totalHours;
 
   // 3. 更新者と更新日時の記録
   valuesToUpdate[mainIndices.PROGRESS_EDITOR] = tantoushaName;
   valuesToUpdate[mainIndices.UPDATE_TS] = new Date();
-  
-  // 4. 仕掛日と完了日の自動記録
-  const mainRowData = targetRowInfo.data;
-  const currentStartDate = mainRowData[mainIndices.START_DATE - 1];
-  if (!isValidDate(currentStartDate) && newProgress !== '未着手') {
-    valuesToUpdate[mainIndices.START_DATE] = new Date();
-  }
-  if (newProgress === '完了') {
-     valuesToUpdate[mainIndices.COMPLETE_DATE] = new Date();
-  } else {
-     valuesToUpdate[mainIndices.COMPLETE_DATE] = ''; // 完了でなくなった場合は完了日をクリア
-  }
 
-  // メインシートの対応する行を一度に更新
+  // 4. メインシートの対応する行を一度に更新
   const updateRange = mainSheet.sheet.getRange(targetRowInfo.rowNum, 1, 1, mainSheet.getLastColumn());
   const newRowData = updateRange.getValues()[0];
   for (const [colIndex, value] of Object.entries(valuesToUpdate)) {

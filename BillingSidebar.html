@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+    <style>
+      .sidebar { padding: 15px; }
+      .block { margin-bottom: 20px; }
+      h4 { font-weight: bold; margin-bottom: 10px; }
+      select { width: 100%; }
+      button { margin-top: 15px; }
+      .loading { color: #888; }
+    </style>
+  </head>
+  <body>
+    <div class="sidebar">
+
+      <div class="block">
+        <h4>対象月を選択</h4>
+        <select id="month-select">
+          <option value="" class="loading">読み込み中...</option>
+        </select>
+      </div>
+
+      <button class="action" id="updateBtn" onclick="updateBillingSheet()">請求シートを更新</button>
+
+    </div>
+
+    <script>
+      /**
+       * サイドバーが開かれたときに実行され、マスタから月の選択肢を読み込みます。
+       */
+      document.addEventListener("DOMContentLoaded", function() {
+        google.script.run.withSuccessHandler(populateMonthOptions).getBillingMonthOptions();
+      });
+
+      /**
+       * サーバーから取得した月のデータで、ドロップダウンリストを生成します。
+       */
+      function populateMonthOptions(months) {
+        const select = document.getElementById('month-select');
+        select.innerHTML = ''; // 「読み込み中」をクリア
+
+        if (months && months.length > 0) {
+          months.forEach(month => {
+            const option = document.createElement('option');
+            option.value = month.value; // 'YYYY-MM'
+            option.textContent = month.text; // 'YYYY年M月'
+            select.appendChild(option);
+          });
+        } else {
+          const option = document.createElement('option');
+          option.textContent = '対象月がありません';
+          option.disabled = true;
+          select.appendChild(option);
+        }
+      }
+
+      /**
+       * 「請求シートを更新」ボタンが押されたときに実行されます。
+       */
+      function updateBillingSheet() {
+        const btn = document.getElementById('updateBtn');
+        const select = document.getElementById('month-select');
+        const selectedMonth = select.value;
+        
+        if (!selectedMonth) {
+          // Google Apps ScriptのUI機能はHTMLサービス内では直接使えないため、
+          // 簡易的なアラートで代替します。
+          alert('月を選択してください。');
+          return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '更新中...';
+
+        google.script.run
+          .withSuccessHandler(() => {
+            // 成功したらサイドバーを閉じる
+            google.script.host.close();
+          })
+          .withFailureHandler(err => {
+            alert('エラーが発生しました: ' + err.message);
+            btn.disabled = false;
+            btn.textContent = '請求シートを更新';
+          })
+          .updateBillingSheet(selectedMonth);
+      }
+    </script>
+  </body>
+</html>
