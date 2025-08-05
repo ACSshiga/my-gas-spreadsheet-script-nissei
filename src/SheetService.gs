@@ -7,9 +7,6 @@
 // === すべてのシートクラスの基盤となる抽象クラス ===
 // =================================================================================
 class SheetService {
-  /**
-   * @param {string} sheetName 操作対象のシート名
-   */
   constructor(sheetName) {
     if (this.constructor === SheetService) {
       throw new Error("SheetServiceは抽象クラスのためインスタンス化できません。");
@@ -17,10 +14,11 @@ class SheetService {
     this.ss = SpreadsheetApp.getActiveSpreadsheet();
     this.sheet = this.ss.getSheetByName(sheetName);
     if (!this.sheet) {
+      // シートがない場合は、指定した名前で作成する
       this.sheet = this.ss.insertSheet(sheetName);
     }
     this.sheetName = sheetName;
-    this.startRow = 2;
+    this.startRow = 2; // デフォルトのデータ開始行
   }
 
   getSheet() { return this.sheet; }
@@ -85,7 +83,11 @@ class InputSheet extends SheetService {
   initializeSheet() {
     this.sheet.clear();
     const headers = Object.values(INPUT_SHEET_HEADERS);
-    this.sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold");
+    // ヘッダー行に背景色と太字を設定
+    this.sheet.getRange(1, 1, 1, headers.length)
+      .setValues([headers])
+      .setFontWeight("bold")
+      .setBackground(CONFIG.COLORS.HEADER_BACKGROUND);
     
     const separatorCol = headers.indexOf("");
     if (separatorCol !== -1) {
@@ -99,6 +101,7 @@ class InputSheet extends SheetService {
     const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
     const datesToGenerate = [prevMonth, thisMonth];
     let currentCol = headers.length + 1;
+
     datesToGenerate.forEach(date => {
       const year = date.getFullYear();
       const month = date.getMonth();
@@ -111,7 +114,11 @@ class InputSheet extends SheetService {
       }
     });
     if (dateHeaders.length > 0) {
-      this.sheet.getRange(1, headers.length + 1, 1, dateHeaders.length).setValues([dateHeaders]).setNumberFormat("M/d");
+      this.sheet.getRange(1, headers.length + 1, 1, dateHeaders.length)
+        .setValues([dateHeaders])
+        .setNumberFormat("M/d")
+        .setBackground(CONFIG.COLORS.HEADER_BACKGROUND) // 日付ヘッダーにも色付け
+        .setFontWeight("bold"); 
       this.sheet.getRange(2, headers.length + 1, 1, sumFormulas.length).setFormulas([sumFormulas]);
     }
 
@@ -148,7 +155,6 @@ class InputSheet extends SheetService {
     });
   }
 
-  // ▼▼▼ ここから修正 ▼▼▼
   clearData() {
     const existingFilter = this.sheet.getFilter();
     if (existingFilter) {
@@ -156,11 +162,9 @@ class InputSheet extends SheetService {
     }
     const lastRow = this.getLastRow();
     if (lastRow >= this.startRow) {
-      // .clearContent() から .clear() に変更して、書式ごとクリアする
       this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, this.getLastColumn()).clear();
     }
   }
-  // ▲▲▲ ここまで修正 ▲▲▲
 
   writeData(data) {
     const existingFilter = this.sheet.getFilter();
@@ -169,8 +173,11 @@ class InputSheet extends SheetService {
     }
     
     if (data.length === 0) return;
-    this.sheet.getRange(this.startRow, 1, data.length, data[0].length).setValues(data);
+    const range = this.sheet.getRange(this.startRow, 1, data.length, data[0].length);
+    range.setValues(data);
 
+    // ▼▼▼ ここから修正 ▼▼▼
+    // 実績工数合計の数式を設定
     const sumFormulas = [];
     const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
     const dateStartColLetter = this.sheet.getRange(1, dateStartCol).getA1Notation().replace("1", "");
@@ -180,8 +187,12 @@ class InputSheet extends SheetService {
     }
     this.sheet.getRange(this.startRow, this.indices.ACTUAL_HOURS_SUM, data.length, 1).setFormulas(sumFormulas);
     
-    if(this.sheet.getLastRow() > 1) {
-      this.sheet.getRange(1, 1, this.sheet.getLastRow(), this.sheet.getLastColumn()).createFilter();
+    // データ範囲にフィルタを適用し、列幅を自動調整
+    const fullDataRange = this.sheet.getRange(1, 1, this.sheet.getLastRow(), this.sheet.getLastColumn());
+    if (this.sheet.getLastRow() > 1) {
+      fullDataRange.createFilter();
     }
+    this.sheet.autoResizeColumns(1, this.sheet.getLastColumn());
+    // ▲▲▲ ここまで修正 ▲▲▲
   }
 }

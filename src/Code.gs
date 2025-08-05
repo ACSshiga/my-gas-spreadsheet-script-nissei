@@ -247,8 +247,12 @@ function setupAllDataValidations() {
 function colorizeAllSheets() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const mainSheet = new MainSheet();
-    colorizeSheet_(mainSheet);
+    // メインシートのヘッダーと交互行の色付け
+    const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
+    if (mainSheet) {
+      mainSheet.getRange(1, 1, 1, mainSheet.getLastColumn()).setBackground(CONFIG.COLORS.HEADER_BACKGROUND).setFontWeight('bold');
+      colorizeSheet_(new MainSheet());
+    }
 
     const allSheets = ss.getSheets();
     allSheets.forEach(sheet => {
@@ -256,11 +260,11 @@ function colorizeAllSheets() {
       if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
         try {
           const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
-          const inputSheet = new InputSheet(tantoushaName);
-          colorizeSheet_(inputSheet);
+          colorizeSheet_(new InputSheet(tantoushaName));
         } catch (e) { /* エラーは無視 */ }
       } else if (sheetName.startsWith('View_')) {
         try {
+          sheet.getRange(1, 1, 1, sheet.getLastColumn()).setBackground(CONFIG.COLORS.HEADER_BACKGROUND).setFontWeight('bold');
           const viewSheetObj = {
             getSheet: () => sheet,
             indices: getColumnIndices(sheet, MAIN_SHEET_HEADERS),
@@ -332,28 +336,21 @@ function colorizeSheet_(sheetObject) {
         restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
       }
     } else {
-      // 既存の色をリセット
+      // 交互の行に色を付けるためのベースカラーを決定
+      const baseColor = ((startRow + i) % 2 === 0) ? CONFIG.COLORS.ALT_ROW_BACKGROUND : CONFIG.COLORS.DEFAULT_BACKGROUND;
       for (let j = 0; j < lastCol; j++) {
-          if(!formulas[i][j]) backgroundColors[i][j] = CONFIG.COLORS.DEFAULT_BACKGROUND;
+          if(!formulas[i][j]) backgroundColors[i][j] = baseColor;
       }
 
-      // ▼▼▼ ここから修正 ▼▼▼
       if (progressCol) {
         const progressValue = safeTrim(row[progressCol - 1]);
-        let progressColor;
-
-        if (progressValue === "") {
-            // 進捗が空欄の場合はデフォルトの色（白）にする
-            progressColor = CONFIG.COLORS.DEFAULT_BACKGROUND;
-        } else {
-            // 進捗に値がある場合は、定義された色を取得する
-            progressColor = getColor(PROGRESS_COLORS, progressValue);
+        // 進捗の値に基づいて色を上書き
+        if (progressValue !== "") {
+            const progressColor = getColor(PROGRESS_COLORS, progressValue);
+            backgroundColors[i][progressCol - 1] = progressColor;
+            if (mgmtNoCol) backgroundColors[i][mgmtNoCol - 1] = progressColor;
         }
-        
-        backgroundColors[i][progressCol - 1] = progressColor;
-        if (mgmtNoCol) backgroundColors[i][mgmtNoCol - 1] = progressColor;
       }
-      // ▲▲▲ ここまで修正 ▲▲▲
 
       if (sagyouKubunCol) {
         const sagyouKubunColor = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]));
