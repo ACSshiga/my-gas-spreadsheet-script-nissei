@@ -20,7 +20,7 @@ function onOpen(e) {
     .addSeparator()
     .addItem('サイドバーを開く (フィルタ)', 'showFilterSidebar')
     .addSeparator()
-    .addItem('請求シートを更新', 'showBillingSidebar') // 請求用サイドバーを開くように変更
+    .addItem('請求シートを更新', 'showBillingSidebar')
     .addSeparator()
     .addItem('全機番の資料フォルダ作成', 'bulkCreateKibanFolders')
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
@@ -83,10 +83,21 @@ function clearAllFilters() {
   if (!sheet) return;
 
   const userEmail = Session.getActiveUser().getEmail();
-  const filterView = findUserFilterView(sheet, userEmail);
-  if (filterView) {
-    filterView.remove();
+  
+  // ★エラー修正：既存のフィルタ表示を正しく探して削除する
+  try {
+    const filterViews = sheet.getFilterViews();
+    for (let i = 0; i < filterViews.length; i++) {
+      if (filterViews[i].getName() === `FilterView-${userEmail}`) {
+        filterViews[i].remove();
+        break; // 見つけたらループを抜ける
+      }
+    }
+  } catch (e) {
+    Logger.log(`フィルタ表示のクリア中にエラー: ${e.message}`);
+    // ユーザーに影響がないように、エラーはログに記録するだけ
   }
+
   clearLastFilter();
   SpreadsheetApp.getActiveSpreadsheet().toast('個人用のフィルタを解除しました。');
 }
@@ -103,14 +114,6 @@ function showFilterSidebar() {
 // =================================================================================
 
 /**
- * ユーザーごとのフィルタ表示(Filter View)を検索します。
- */
-function findUserFilterView(sheet, userEmail) {
-  const filterViews = sheet.getFilterViews();
-  return filterViews.find(view => view.getName() === `FilterView-${userEmail}`);
-}
-
-/**
  * サイドバーからの情報に基づき、個人用のフィルタ表示を適用します。
  */
 function applySidebarFilters(filters, save = true) {
@@ -120,24 +123,21 @@ function applySidebarFilters(filters, save = true) {
   const userEmail = Session.getActiveUser().getEmail();
   const indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
   
-  // 既存の個人用フィルタ表示を探す（なければ作成）
-  let filterView = findUserFilterView(sheet, userEmail);
-  if (filterView) {
-    // 既存のフィルタ条件をクリア
-    Object.values(indices).forEach(index => filterView.removeColumnFilterCriteria(index));
-  } else {
-    filterView = sheet.createFilterView();
-    filterView.setName(`FilterView-${userEmail}`);
-  }
+  // ★エラー修正：既存の個人用フィルタ表示を一度削除する
+  clearAllFilters();
+
+  // 新しいフィルタ表示を作成
+  const filterView = sheet.createFilterView();
+  filterView.setName(`FilterView-${userEmail}`);
   
   // 新しいフィルタ条件を設定
   // 担当者
-  if (filters.tantousha && filters.tantousha.length > 0) {
+  if (filters.tantousha && filters.tantousha.length > 0 && indices.TANTOUSHA) {
     const criteria = SpreadsheetApp.newFilterCriteria().setVisibleValues(filters.tantousha).build();
     filterView.setColumnFilterCriteria(indices.TANTOUSHA, criteria);
   }
   // 進捗
-  if (filters.progress && filters.progress.length > 0) {
+  if (filters.progress && filters.progress.length > 0 && indices.PROGRESS) {
     const criteria = SpreadsheetApp.newFilterCriteria().setVisibleValues(filters.progress).build();
     filterView.setColumnFilterCriteria(indices.PROGRESS, criteria);
   }
@@ -146,7 +146,6 @@ function applySidebarFilters(filters, save = true) {
     saveLastFilter(filters);
   }
 }
-
 
 function saveLastFilter(filters) {
   PropertiesService.getUserProperties().setProperty('lastFilter', JSON.stringify(filters));
@@ -157,7 +156,6 @@ function restoreLastFilter() {
   if (lastFilterJson) {
     const lastFilter = JSON.parse(lastFilterJson);
     applySidebarFilters(lastFilter, false); // 復元時は再保存しない
-    SpreadsheetApp.getActiveSpreadsheet().toast('前回のフィルタを復元しました。');
   }
 }
 
@@ -176,12 +174,13 @@ function getFilterOptions() {
   };
 }
 
-
 // =================================================================================
 // === データ入力規則の自動設定 ===
 // =================================================================================
 function setupAllDataValidations() {
   const mainSheet = new MainSheet().getSheet();
+  if (mainSheet.getLastRow() < CONFIG.DATA_START_ROW.MAIN) return;
+  
   const lastRow = mainSheet.getMaxRows();
   const headerIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
   
@@ -197,30 +196,8 @@ function setupAllDataValidations() {
       const masterValues = getMasterData(masterName).flat(); // 1次元配列に変換
       if (masterValues.length > 0) {
         const rule = SpreadsheetApp.newDataValidation().requireValueInList(masterValues).setAllowInvalid(false).build();
-        mainSheet.getRange(CONFIG.DATA_START_ROW.MAIN, colIndex, lastRow).setDataValidation(rule);
+        mainSheet.getRange(CONFIG.DATA_START_ROW.MAIN, colIndex, lastRow - CONFIG.DATA_START_ROW.MAIN + 1).setDataValidation(rule);
       }
     }
   }
-}
-
-/**
- * 【デバッグ用】現在操作しているユーザーのメールアドレスを確認します。
- */
-function checkMyEmail() {
-  const userEmail = Session.getActiveUser().getEmail();
-  SpreadsheetApp.getUi().alert(`スクリプトが認識しているメールアドレスは以下です：\n\n${userEmail}`);
-}
-
-/**
- * 【デバッグ用】スクリプトが記憶しているマスタシートのキャッシュをクリアします。
- */
-function clearCache() {
-  const cache = CacheService.getScriptCache();
-  // 問題の原因となっている可能性のあるマスタのキャッシュキーを具体的に指定して削除
-  const keysToRemove = [
-    `master_${CONFIG.SHEETS.TANTOUSHA_MASTER}_2`,
-    `master_${CONFIG.SHEETS.TANTOUSHA_MASTER}_1`
-  ];
-  cache.removeAll(keysToRemove);
-  SpreadsheetApp.getUi().alert('マスタデータのキャッシュをクリアしました。');
 }
