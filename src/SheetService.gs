@@ -50,7 +50,7 @@ class MainSheet extends SheetService {
    * 「担当者マスタ」シートから担当者の情報（名前とメールアドレス）を取得します。
    */
   getTantoushaList() {
-    return getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER, 2)
+    return getMasterData(CONFIG.SHEETS.TANTOU.HA_MASTER, 2)
       .map(row => ({ name: row[0], email: row[1] }))
       .filter(item => item.name && item.email);
   }
@@ -90,40 +90,67 @@ class InputSheet extends SheetService {
     super(sheetName);
     this.tantoushaName = tantoushaName;
     this.startRow = CONFIG.DATA_START_ROW.INPUT;
-    this.indices = getColumnIndices(this.sheet, INPUT_SHEET_HEADERS);
-
-    // シートが新規作成された場合、または空の場合に初期化
+    
+    // ★シートが新規作成された場合、または空の場合に初期化
     if (this.sheet.getLastRow() < 2) {
       this.initializeSheet();
     }
+    this.indices = getColumnIndices(this.sheet, INPUT_SHEET_HEADERS);
     
     // ★表示する日付列を当月と前月に絞る
     this.filterDateColumns();
   }
 
   /**
-   * 工数シートを初期化し、ヘッダーと数式を設定します。
+   * ★★★ 修正箇所 ★★★
+   * 工数シートを初期化し、ヘッダー、数式、日付列を完全に自動生成します。
    */
   initializeSheet() {
-    this.sheet.clear(); // シートをクリア
+    this.sheet.clear(); // シートを一旦クリア
     const headers = Object.values(INPUT_SHEET_HEADERS);
+    // 1行目にヘッダーを設定
     this.sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold");
-    this.sheet.getRange(2, headers.length - 1).setValue("日次合計").setHorizontalAlignment("right");
     
+    // 2行目に「日次合計」ラベルを設定
+    const sumLabelCol = headers.indexOf("実績工数合計"); // "実績工数合計"の1つ前の列
+    if (sumLabelCol > 0) {
+      this.sheet.getRange(2, sumLabelCol).setValue("日次合計").setHorizontalAlignment("right");
+    }
+
+    // G列から日付列を生成（前月と当月）
+    const dateHeaders = [];
+    const sumFormulas = [];
+    const today = new Date();
+    const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    const datesToGenerate = [prevMonth, thisMonth];
+    let currentCol = headers.length + 1;
+
+    datesToGenerate.forEach(date => {
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      for (let i = 1; i <= daysInMonth; i++) {
+        dateHeaders.push(new Date(year, month, i));
+        const colLetter = this.sheet.getRange(1, currentCol).getA1Notation().replace("1", "");
+        sumFormulas.push(`=IFERROR(SUM(${colLetter}${this.startRow}:${colLetter}))`);
+        currentCol++;
+      }
+    });
+    
+    if (dateHeaders.length > 0) {
+      this.sheet.getRange(1, headers.length + 1, 1, dateHeaders.length).setValues([dateHeaders]).setNumberFormat("M/d");
+      this.sheet.getRange(2, headers.length + 1, 1, sumFormulas.length).setFormulas([sumFormulas]);
+    }
+
+    // 凍結設定
     this.sheet.setFrozenRows(2);
     this.sheet.setFrozenColumns(3);
-    this.updateDateColumns(); // 日付列を生成
   }
   
   /**
-   * ★工数シートの日付列を更新・生成します。
-   */
-  updateDateColumns() {
-      // ToDo: 必要に応じて日付列を動的に追加・更新するロジックを実装
-  }
-  
-  /**
-   * ★表示する日付列を、当月と前月のものだけにフィルタリングします。
+   * 表示する日付列を、当月と前月のものだけにフィルタリングします。
    */
   filterDateColumns() {
     const sheet = this.sheet;
@@ -145,7 +172,6 @@ class InputSheet extends SheetService {
         const dateYear = date.getFullYear();
         const dateMonth = date.getMonth();
         
-        // 当月または前月でない場合は非表示
         const isCurrentMonth = (dateYear === currentYear && dateMonth === currentMonth);
         const isPreviousMonth = (currentMonth === 0) 
             ? (dateYear === currentYear - 1 && dateMonth === 11) 
@@ -184,7 +210,7 @@ class InputSheet extends SheetService {
     
     for (let i = 0; i < data.length; i++) {
       const rowNum = this.startRow + i;
-      sumFormulas.push([`=SUM(${dateStartColLetter}${rowNum}:${rowNum})`]);
+      sumFormulas.push([`=IFERROR(SUM(${dateStartColLetter}${rowNum}:${rowNum}))`]);
     }
     this.sheet.getRange(this.startRow, this.indices.ACTUAL_HOURS_SUM, data.length, 1).setFormulas(sumFormulas);
   }

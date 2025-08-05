@@ -9,23 +9,35 @@
 // =================================================================================
 
 function onOpen(e) {
-  SpreadsheetApp.getUi().createMenu('カスタムメニュー')
-    .addItem('自分の担当案件のみ表示', 'createPersonalView')
-    .addItem('表示を更新', 'refreshPersonalView') 
-    .addItem('フィルタ表示を終了', 'removePersonalView')
-    .addSeparator()
+  const ui = SpreadsheetApp.getUi();
+
+  // ★メニュー構成を更新
+  const menu = ui.createMenu('カスタムメニュー');
+  const activeSheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  
+  // メインシート用のメニュー
+  if (activeSheet.getName() === CONFIG.SHEETS.MAIN) {
+    menu.addItem('自分の担当案件のみ表示', 'createPersonalView');
+    menu.addItem('フィルタ表示を終了', 'removePersonalView');
+  } 
+  // 工数シート用のメニュー
+  else if (activeSheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+    menu.addItem('すべての月を表示', 'showAllDateColumns');
+    menu.addItem('表示を当月・前月に戻す', 'hideOldDateColumns');
+  }
+
+  menu.addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
     .addSeparator()
     .addItem('全機番の資料フォルダ作成', 'bulkCreateKibanFolders')
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addToUi();
   
-  // ★起動時にメインシートと全工数シートの入力規則を更新
+  // 起動時の初期化処理
   setupAllDataValidations();
 }
 
 function onEdit(e) {
-  // (DataSync.gsに処理が実装されているため、ここのロジックは変更なし)
   if (!e || !e.source || !e.range) return;
   const sheet = e.range.getSheet();
   const sheetName = sheet.getName();
@@ -48,22 +60,47 @@ function onEdit(e) {
 }
 
 // =================================================================================
-// === ★個人用ビュー（仮想シート）機能 ===
+// === ★工数シート表示切替機能 ===
 // =================================================================================
+/**
+ * 工数シートの非表示になっている日付列をすべて表示します。
+ */
+function showAllDateColumns() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  if (!sheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+    SpreadsheetApp.getUi().alert('この機能は工数シートでのみ利用できます。');
+    return;
+  }
+  
+  const lastCol = sheet.getLastColumn();
+  const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
+
+  if (lastCol >= dateStartCol) {
+    sheet.showColumns(dateStartCol, lastCol - dateStartCol + 1);
+    SpreadsheetApp.getActiveSpreadsheet().toast('すべての日付列を表示しました。');
+  }
+}
 
 /**
- * ★表示を更新するための関数（削除と作成を連続実行）
+ * 工数シートの表示を当月・前月に戻します（リロードと同じ効果）。
  */
-function refreshPersonalView() {
-  SpreadsheetApp.getActiveSpreadsheet().toast('表示を更新しています...', '処理中', 5);
-  removePersonalView(false); // メッセージなしで削除
-  createPersonalView();
+function hideOldDateColumns() {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    if (!sheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+      SpreadsheetApp.getUi().alert('この機能は工数シートでのみ利用できます。');
+      return;
+    }
+    const tantoushaName = sheet.getName().replace(CONFIG.SHEETS.INPUT_PREFIX, '');
+    const inputSheet = new InputSheet(tantoushaName);
+    inputSheet.filterDateColumns(); // この関数が当月・前月以外を非表示にする
+    SpreadsheetApp.getActiveSpreadsheet().toast('表示を当月・前月に戻しました。');
 }
 
 
-/**
- * 現在のユーザー専用のビューシートを作成します。
- */
+// =================================================================================
+// === 個人用ビュー（仮想シート）機能 ===
+// =================================================================================
+
 function createPersonalView() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const userEmail = Session.getActiveUser().getEmail();
@@ -83,8 +120,7 @@ function createPersonalView() {
     return index === 0 || row[mainIndices.TANTOUSHA - 1] === tantoushaName;
   });
 
-  // 既存の個人用シートがあれば削除
-  removePersonalView(false); // メッセージなしで削除
+  removePersonalView(false);
 
   const viewSheetName = `View_${tantoushaName}`;
   const viewSheet = ss.insertSheet(viewSheetName, 0);
@@ -98,10 +134,6 @@ function createPersonalView() {
   ss.toast(`${tantoushaName}さん専用の表示を作成しました。`, '完了', 3);
 }
 
-/**
- * ユーザー専用のビューシートを削除します。
- * @param {boolean} [showMessage=true] - 完了メッセージを表示するかどうか
- */
 function removePersonalView(showMessage = true) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const userEmail = Session.getActiveUser().getEmail();
@@ -114,7 +146,7 @@ function removePersonalView(showMessage = true) {
       ss.deleteSheet(sheetToDelete);
     }
   }
-  // メインシートをアクティブに戻す
+
   const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN)
   if(mainSheet) mainSheet.activate();
   
@@ -127,13 +159,8 @@ function removePersonalView(showMessage = true) {
 // =================================================================================
 // === データ入力規則の自動設定 ===
 // =================================================================================
-/**
- * ★★★ 修正箇所 ★★★
- * メインシートと、すべての工数シートにドロップダウンリストを設定します。
- */
 function setupAllDataValidations() {
   try {
-    // 1. メインシートへの設定
     const mainSheet = new MainSheet();
     const mainSheetObj = mainSheet.getSheet();
     if (mainSheetObj.getLastRow() >= mainSheet.startRow) {
@@ -142,7 +169,6 @@ function setupAllDataValidations() {
       
       const mainValidationMap = {
         [CONFIG.SHEETS.SAGYOU_KUBUN_MASTER]: mainHeaderIndices.SAGYOU_KUBUN,
-        // [CONFIG.SHEETS.SHINCHOKU_MASTER]: mainHeaderIndices.PROGRESS, // ★メインシートの進捗ドロップダウンを削除
         [CONFIG.SHEETS.TOIAWASE_MASTER]: mainHeaderIndices.TOIAWASE,
         [CONFIG.SHEETS.TANTOUSHA_MASTER]: mainHeaderIndices.TANTOUSHA,
       };
@@ -156,13 +182,12 @@ function setupAllDataValidations() {
           }
         }
       }
-      // ★メインシートの進捗列の入力規則をクリア
+
       if (mainHeaderIndices.PROGRESS) {
         mainSheetObj.getRange(mainSheet.startRow, mainHeaderIndices.PROGRESS, mainLastRow - mainSheet.startRow + 1).clearDataValidations();
       }
     }
 
-    // 2. 全工数シートへの設定
     const progressValues = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER).flat();
     if (progressValues.length === 0) return;
 
