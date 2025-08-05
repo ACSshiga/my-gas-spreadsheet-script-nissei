@@ -8,6 +8,115 @@
       .filter-group { margin-bottom: 20px; }
       h4 { font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
       .checkbox-group { display: flex; flex-direction: column; }
+      .checkbox-group label { margin-bottom: 5px; display: block; }
+      button { margin-top: 15px; }
+      .loading { color: #888; }
+    </style>
+  </head>
+  <body>
+    <div class="sidebar">
+
+      <div class="filter-group">
+        <h4>担当者で絞り込む</h4>
+        <div id="tantousha-filter" class="checkbox-group">
+          <p class="loading">読み込み中...</p>
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <h4>進捗で絞り込む</h4>
+        <div id="progress-filter" class="checkbox-group">
+           <p class="loading">読み込み中...</p>
+        </div>
+      </div>
+
+      <button class="action" onclick="applyFilters()">フィルタ適用</button>
+      <button onclick="clearFilters()">フィルタをクリア</button>
+
+    </div>
+
+    <script>
+      /**
+       * サイドバーが開かれたときに実行され、マスタからフィルタの選択肢を読み込みます。
+       */
+      document.addEventListener("DOMContentLoaded", function() {
+        google.script.run.withSuccessHandler(populateCheckboxes).getFilterOptions();
+      });
+
+      /**
+       * サーバーから取得したマスタデータで、チェックボックスを生成します。
+       */
+      function populateCheckboxes(options) {
+        const tantoushaContainer = document.getElementById('tantousha-filter');
+        const progressContainer = document.getElementById('progress-filter');
+
+        tantoushaContainer.innerHTML = '';
+        progressContainer.innerHTML = '';
+
+        if (options.tantousha && options.tantousha.length > 0) {
+          options.tantousha.forEach(item => {
+            const name = item[0]; // 担当者名は1列目
+            const label = document.createElement('label');
+            label.innerHTML = `<input type="checkbox" name="tantousha" value="${name}"> ${name}`;
+            tantoushaContainer.appendChild(label);
+          });
+        } else {
+          tantoushaContainer.innerHTML = '担当者マスタにデータがありません。';
+        }
+
+        if (options.progress && options.progress.length > 0) {
+          options.progress.forEach(item => {
+            const status = item[0]; // 進捗ステータスは1列目
+            const label = document.createElement('label');
+            label.innerHTML = `<input type="checkbox" name="progress" value="${status}"> ${status}`;
+            progressContainer.appendChild(label);
+          });
+        } else {
+           progressContainer.innerHTML = '進捗マスタにデータがありません。';
+        }
+      }
+
+      /**
+       * 「フィルタ適用」ボタンが押されたときに実行されます。
+       */
+      function applyFilters() {
+        this.disabled = true; // ボタンを無効化
+        const selectedFilters = {
+          tantousha: getSelectedValues('tantousha'),
+          progress: getSelectedValues('progress')
+        };
+        google.script.run.withSuccessHandler(() => {
+          this.disabled = false; // 処理完了後にボタンを有効化
+        }).applySidebarFilters(selectedFilters);
+      }
+
+      /**
+       * 「フィルタをクリア」ボタンが押されたときに実行されます。
+       */
+      function clearFilters() {
+        google.script.run.clearAllFilters();
+        document.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+      }
+      
+      /**
+       * 指定された名前のチェックボックスで、選択されている値の配列を取得します。
+       */
+      function getSelectedValues(name) {
+        return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`))
+                    .map(checkbox => checkbox.value);
+      }
+    </script>
+  </body>
+</html><!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+    <style>
+      .sidebar { padding: 15px; }
+      .filter-group { margin-bottom: 20px; }
+      h4 { font-weight: bold; margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+      .checkbox-group { display: flex; flex-direction: column; }
       .checkbox-group label { margin-bottom: 5px; }
       button { margin-top: 15px; }
     </style>
