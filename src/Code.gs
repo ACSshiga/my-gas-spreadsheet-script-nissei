@@ -30,8 +30,9 @@ function onOpen(e) {
     .addToUi();
   setupAllDataValidations();
   
-  // 初回開いた時に未着手の設定
+  // 初回開いた時に未着手の設定と色付け
   syncDefaultProgressToMain();
+  colorizeAllSheets();
 }
 
 function onEdit(e) {
