@@ -71,7 +71,7 @@ function colorizeSheet_(sheetObject) {
 
   values.forEach((row, i) => {
     // メインシートの場合のみ、担当者と問い合わせの色付けを行う
-    if (sheetObject instanceof MainSheet) {
+    if (sheetObject instanceof MainSheet || sheet.getName().startsWith('View_')) {
       const tantousha = safeTrim(row[indices.TANTOUSHA - 1]);
       const toiawase = safeTrim(row[indices.TOIAWASE - 1]);
       backgroundColors[i][indices.TANTOUSHA - 1] = getColor(TANTOUSHA_COLORS, tantousha);
