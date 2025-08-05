@@ -7,7 +7,90 @@
 // =================================================================================
 // === 日付関連ユーティリティ ===
 // =================================================================================
-// ... (既存のコードはそのまま) ...
+function formatDateForComparison(date) {
+  if (!isValidDate(date)) return null;
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+function getJapaneseHolidays(year) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `holidays_${year}`;
+  const cached = cache.get(cacheKey);
+
+  if (cached) {
+    return new Set(JSON.parse(cached));
+  }
+  try {
+    const calendar = CalendarApp.getCalendarById(CONFIG.HOLIDAY_CALENDAR_ID);
+    if (!calendar) {
+      console.warn("祝日カレンダーが見つかりません。");
+      return new Set();
+    }
+    const startDate = new Date(year, 0, 1);
+    const endDate = new Date(year, 11, 31);
+    const events = calendar.getEvents(startDate, endDate);
+    const holidays = new Set(events.map(e => formatDateForComparison(e.getStartTime())));
+    cache.put(cacheKey, JSON.stringify([...holidays]), 21600);
+    return holidays;
+  } catch (e) {
+    console.error("祝日取得エラー:", e);
+    return new Set();
+  }
+}
+
+function isHoliday(date, holidaySet) {
+  if (!isValidDate(date)) return false;
+  const dayOfWeek = date.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) return true;
+  return holidaySet.has(formatDateForComparison(date));
+}
+
+function isValidDate(value) {
+  return value instanceof Date && !isNaN(value.getTime());
+}
+
+// =================================================================================
+// === 文字列・データ処理ユーティリティ ===
+// =================================================================================
+function safeTrim(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+function createHyperlinkFormula(url, displayText) {
+  if (!url) return "";
+  const safeUrl = String(url).replace(/"/g, '""');
+  const safeText = String(displayText || url).replace(/"/g, '""');
+  return `=HYPERLINK("${safeUrl}", "${safeText}")`;
+}
+
+function toNumber(value) {
+  const num = parseFloat(value);
+  return isNaN(num) ? 0 : num;
+}
+
+// =================================================================================
+// === マスタデータ取得ユーティリティ ===
+// =================================================================================
+function getMasterData(masterSheetName, numColumns = 1) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `master_${masterSheetName}_${numColumns}`;
+  const cached = cache.get(cacheKey);
+
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) { /* ignore */ }
+  }
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(masterSheetName);
+  if (!sheet) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const values = sheet.getRange(2, 1, lastRow - 1, numColumns).getValues();
+  const filteredValues = values.filter(row => row[0] !== "");
+  cache.put(cacheKey, JSON.stringify(filteredValues), 3600);
+  return filteredValues;
+}
 
 function getTantoushaNameByEmail(email) {
   if (!email) return null;
@@ -23,7 +106,7 @@ function logWithTimestamp(message) {
 }
 
 // =================================================================================
-// === ★★★ 新規追加 ★★★ ===
+// === キャッシュクリア機能 ===
 // =================================================================================
 /**
  * スクリプトが使用するすべてのキャッシュを削除します。
@@ -31,7 +114,8 @@ function logWithTimestamp(message) {
  */
 function clearScriptCache() {
   try {
-    CacheService.getScriptCache().removeAll();
+    const cache = CacheService.getScriptCache(); // ★★★ 修正箇所 ★★★
+    cache.removeAll();                         // ★★★ 修正箇所 ★★★
     SpreadsheetApp.getActiveSpreadsheet().toast('スクリプトのキャッシュをクリアしました。', '完了', 3);
     logWithTimestamp("スクリプトのキャッシュがクリアされました。");
   } catch (e) {

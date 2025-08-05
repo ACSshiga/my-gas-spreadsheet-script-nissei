@@ -59,12 +59,10 @@ function colorizeSheet_(sheetObject) {
   const lastCol = sheet.getLastColumn();
   const fullRange = sheet.getRange(startRow, 1, dataRows, lastCol);
 
-  // 数式を破壊しないよう、表示値と数式の両方を取得
   const displayValues = fullRange.getDisplayValues();
   const formulas = fullRange.getFormulas();
   const backgroundColors = fullRange.getBackgrounds();
   
-  // シートに書き戻すための配列を準備 (displayValuesをディープコピー)
   const outputValues = JSON.parse(JSON.stringify(displayValues));
 
   const mgmtNoCol = indices.MGMT_NO;
@@ -105,9 +103,9 @@ function colorizeSheet_(sheetObject) {
         restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
       }
     } else {
-      // 既存の色をリセットしないように、デフォルトの色は白にする
+      // 既存の色をリセット
       for (let j = 0; j < lastCol; j++) {
-          backgroundColors[i][j] = CONFIG.COLORS.DEFAULT_BACKGROUND;
+          if(!formulas[i][j]) backgroundColors[i][j] = CONFIG.COLORS.DEFAULT_BACKGROUND;
       }
 
       if (progressCol) {
@@ -125,7 +123,6 @@ function colorizeSheet_(sheetObject) {
     }
   });
 
-  // 数式を復元する
   formulas.forEach((row, i) => {
     row.forEach((formula, j) => {
       if (formula) {
@@ -155,7 +152,6 @@ function colorizeSheet_(sheetObject) {
           .build();
         normalRanges.forEach(range => range.setDataValidation(normalRule));
       } else {
-         // マスタが空の場合も入力規則をクリア
          normalRanges.forEach(range => range.clearDataValidations());
       }
     }
@@ -164,7 +160,6 @@ function colorizeSheet_(sheetObject) {
 
 /**
  * 工数シートの土日・祝日の日付列に背景色を設定します。
- * (この関数は現在、パフォーマンス上の理由でcolorizeAllSheetsからは呼び出されていません)
  */
 function colorizeHolidayColumns_(inputSheetObject) {
   const sheet = inputSheetObject.getSheet();
