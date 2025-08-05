@@ -71,7 +71,7 @@ const TOIAWASE_COLORS = new Map([
 
 // ★★★ ここから追加 ★★★
 const SAGYOU_KUBUN_COLORS = new Map([
-  ["盤配", "#e3f2fd"],  // 例: ライトブルー
+  ["盤配", "#ffcdd2"],  // 例: ライトブルー
   ["線加工", "#e8f5e9"], // 例: ライトグリーン
 ]);
 // ★★★ ここまで追加 ★★★
