@@ -58,7 +58,7 @@ function colorizeSheet_(sheetObject) {
   const dataRows = lastRow - startRow + 1;
   const lastCol = sheet.getLastColumn();
   const fullRange = sheet.getRange(startRow, 1, dataRows, lastCol);
-  
+
   // 数式を破壊しないよう、表示値と数式の両方を取得
   const displayValues = fullRange.getDisplayValues();
   const formulas = fullRange.getFormulas();
@@ -135,6 +135,51 @@ function colorizeSheet_(sheetObject) {
   if (sheetObject instanceof MainSheet) {
     if (restrictedRanges.length > 0) {
       const restrictedRule = SpreadsheetApp.newDataValidation()
-        .requireValueInRange(sheet.getRange('A1:A1'), false)
+        .requireValueInRange(sheet.getRange('A1:A1'), false) // ダミーの参照範囲
         .setAllowInvalid(false)
         .setHelpText('この行は機番が重複しているため、担当者は設定できません。')
+        .build();
+      restrictedRanges.forEach(range => range.setDataValidation(restrictedRule));
+    }
+    if (normalRanges.length > 0) {
+      const masterValues = getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER).flat();
+      if (masterValues.length > 0) {
+        const normalRule = SpreadsheetApp.newDataValidation()
+          .requireValueInList(masterValues)
+          .setAllowInvalid(false)
+          .build();
+        normalRanges.forEach(range => range.setDataValidation(normalRule));
+      }
+    }
+  }
+}
+
+/**
+ * 工数シートの土日・祝日の日付列に背景色を設定します。
+ * (この関数は現在、パフォーマンス上の理由でcolorizeAllSheetsからは呼び出されていません)
+ */
+function colorizeHolidayColumns_(inputSheetObject) {
+  const sheet = inputSheetObject.getSheet();
+  const lastCol = sheet.getLastColumn();
+  const dateColumnStart = Object.keys(INPUT_SHEET_HEADERS).length + 1;
+
+  if (lastCol < dateColumnStart) return;
+
+  const year = new Date().getFullYear();
+  const holidays = getJapaneseHolidays(year);
+  // 来年の祝日も念のため取得
+  const nextYearHolidays = getJapaneseHolidays(year + 1);
+  nextYearHolidays.forEach(h => holidays.add(h));
+  const headerRange = sheet.getRange(1, dateColumnStart, 1, lastCol - dateColumnStart + 1);
+  const headerDates = headerRange.getValues()[0];
+  const backgrounds = [];
+  // 各日付列の背景色配列を作成
+  for (let i = 0; i < headerDates.length; i++) {
+    const currentCol = dateColumnStart + i;
+    const date = headerDates[i];
+    const color = (isValidDate(date) && isHoliday(date, holidays)) ? CONFIG.COLORS.WEEKEND_HOLIDAY : CONFIG.COLORS.DEFAULT_BACKGROUND;
+    const colBackgrounds = Array(sheet.getMaxRows()).fill([color]);
+    // 2次元配列にするため、1列ずつ設定
+    sheet.getRange(1, currentCol, sheet.getMaxRows()).setBackgrounds(colBackgrounds);
+  }
+}
