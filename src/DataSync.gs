@@ -29,7 +29,6 @@ function syncMainToAllInputSheets() {
       // メインシートから、その担当者の案件データのみをフィルタリング
       const tantoushaData = mainDataValues.filter(row => row[mainIndices.TANTOUSHA - 1] === tantousha.name);
 
-      // ★★★ ここからが修正箇所 ★★★
       // 工数シートに表示するためのデータに変換
       const dataForInputSheet = tantoushaData.map(row => {
         return [
@@ -111,9 +110,12 @@ function syncInputToMain(inputSheetName, editedRange) {
     totalHours = hoursValues.reduce((sum, h) => sum + toNumber(h), 0);
   }
   valuesToUpdate[mainIndices.ACTUAL_HOURS] = totalHours;
+  
   // 3. 更新者と更新日時の記録
   valuesToUpdate[mainIndices.PROGRESS_EDITOR] = tantoushaName;
-  valuesToUpdate[main.indices.UPDATE_TS] = new Date();
+  // ★★★ ここが修正箇所 ★★★
+  valuesToUpdate[mainSheet.indices.UPDATE_TS] = new Date();
+  
   // 4. メインシートの対応する行を一度に更新
   const updateRange = mainSheet.sheet.getRange(targetRowInfo.rowNum, 1, 1, mainSheet.getLastColumn());
   const newRowData = updateRange.getValues()[0];
