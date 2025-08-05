@@ -11,7 +11,7 @@
 function onOpen(e) {
   SpreadsheetApp.getUi().createMenu('カスタムメニュー')
     .addItem('自分の担当案件のみ表示', 'createPersonalView')
-    .addItem('表示を更新', 'refreshPersonalView') // ★更新ボタンを追加
+    .addItem('表示を更新', 'refreshPersonalView') 
     .addItem('フィルタ表示を終了', 'removePersonalView')
     .addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
@@ -20,6 +20,7 @@ function onOpen(e) {
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addToUi();
   
+  // ★起動時にメインシートと全工数シートの入力規則を更新
   setupAllDataValidations();
 }
 
@@ -126,30 +127,58 @@ function removePersonalView(showMessage = true) {
 // =================================================================================
 // === データ入力規則の自動設定 ===
 // =================================================================================
+/**
+ * ★★★ 修正箇所 ★★★
+ * メインシートと、すべての工数シートにドロップダウンリストを設定します。
+ */
 function setupAllDataValidations() {
   try {
-    const mainSheet = new MainSheet().getSheet();
-    if (mainSheet.getLastRow() < CONFIG.DATA_START_ROW.MAIN) return;
-    
-    const lastRow = mainSheet.getMaxRows();
-    const headerIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
-    
-    const validationMap = {
-      [CONFIG.SHEETS.SAGYOU_KUBUN_MASTER]: headerIndices.SAGYOU_KUBUN,
-      [CONFIG.SHEETS.SHINCHOKU_MASTER]: headerIndices.PROGRESS,
-      [CONFIG.SHEETS.TOIAWASE_MASTER]: headerIndices.TOIAWASE,
-      [CONFIG.SHEETS.TANTOUSHA_MASTER]: headerIndices.TANTOUSHA,
-    };
+    // 1. メインシートへの設定
+    const mainSheet = new MainSheet();
+    const mainSheetObj = mainSheet.getSheet();
+    if (mainSheetObj.getLastRow() >= mainSheet.startRow) {
+      const mainLastRow = mainSheetObj.getMaxRows();
+      const mainHeaderIndices = getColumnIndices(mainSheetObj, MAIN_SHEET_HEADERS);
+      
+      const mainValidationMap = {
+        [CONFIG.SHEETS.SAGYOU_KUBUN_MASTER]: mainHeaderIndices.SAGYOU_KUBUN,
+        [CONFIG.SHEETS.SHINCHOKU_MASTER]: mainHeaderIndices.PROGRESS,
+        [CONFIG.SHEETS.TOIAWASE_MASTER]: mainHeaderIndices.TOIAWASE,
+        [CONFIG.SHEETS.TANTOUSHA_MASTER]: mainHeaderIndices.TANTOUSHA,
+      };
 
-    for (const [masterName, colIndex] of Object.entries(validationMap)) {
-      if(colIndex) {
-        const masterValues = getMasterData(masterName).flat();
-        if (masterValues.length > 0) {
-          const rule = SpreadsheetApp.newDataValidation().requireValueInList(masterValues).setAllowInvalid(false).build();
-          mainSheet.getRange(CONFIG.DATA_START_ROW.MAIN, colIndex, lastRow - CONFIG.DATA_START_ROW.MAIN + 1).setDataValidation(rule);
+      for (const [masterName, colIndex] of Object.entries(mainValidationMap)) {
+        if(colIndex) {
+          const masterValues = getMasterData(masterName).flat();
+          if (masterValues.length > 0) {
+            const rule = SpreadsheetApp.newDataValidation().requireValueInList(masterValues).setAllowInvalid(false).build();
+            mainSheetObj.getRange(mainSheet.startRow, colIndex, mainLastRow - mainSheet.startRow + 1).setDataValidation(rule);
+          }
         }
       }
     }
+
+    // 2. 全工数シートへの設定
+    const progressValues = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER).flat();
+    if (progressValues.length === 0) return;
+
+    const progressRule = SpreadsheetApp.newDataValidation().requireValueInList(progressValues).setAllowInvalid(false).build();
+    const tantoushaList = mainSheet.getTantoushaList();
+
+    tantoushaList.forEach(tantousha => {
+      try {
+        const inputSheet = new InputSheet(tantousha.name);
+        const inputSheetObj = inputSheet.getSheet();
+        const inputHeaderIndices = getColumnIndices(inputSheetObj, INPUT_SHEET_HEADERS);
+        const progressCol = inputHeaderIndices.PROGRESS;
+        
+        if (progressCol && inputSheetObj.getLastRow() >= inputSheet.startRow) {
+          const inputLastRow = inputSheetObj.getMaxRows();
+          inputSheetObj.getRange(inputSheet.startRow, progressCol, inputLastRow - inputSheet.startRow + 1).setDataValidation(progressRule);
+        }
+      } catch (e) { /* シートがなくてもエラーにしない */ }
+    });
+
   } catch(e) {
     Logger.log(`データ入力規則の設定中にエラー: ${e.message}`);
   }
