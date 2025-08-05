@@ -17,7 +17,6 @@ function colorizeAllSheets() {
     const mainSheet = new MainSheet();
     colorizeSheet_(mainSheet);
 
-    // 工数シートの色付けは、存在するシートのみ処理
     const allSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
     allSheets.forEach(sheet => {
       const sheetName = sheet.getName();
@@ -26,14 +25,9 @@ function colorizeAllSheets() {
           const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
           const inputSheet = new InputSheet(tantoushaName);
           colorizeSheet_(inputSheet);
-          // 土日祝日の色付けは一旦スキップ（重い処理のため）
-          // colorizeHolidayColumns_(inputSheet);
-        } catch (e) {
-          // エラーは無視
-        }
+        } catch (e) { /* エラーは無視 */ }
       } else if (sheetName.startsWith('View_')) {
         try {
-          // Viewシート用の簡易オブジェクト
           const viewSheetObj = {
             getSheet: () => sheet,
             indices: getColumnIndices(sheet, MAIN_SHEET_HEADERS),
@@ -46,7 +40,6 @@ function colorizeAllSheets() {
         }
       }
     });
-    
     logWithTimestamp("全シートの色付け処理が完了しました。");
   } catch (error) {
     Logger.log(`色付け処理でエラーが発生しました: ${error.stack}`);
@@ -54,7 +47,9 @@ function colorizeAllSheets() {
 }
 
 /**
- * 指定されたシートオブジェクトの各列をルールに基づいて色付けする内部関数。
+ * ★★★ ロジック全体を修正 ★★★
+ * 指定されたシートオブジェクトの各列をルールに基づき色付けします。
+ * 重複行（同じ機番＋作業区分）を検出し、行を灰色にし、進捗名を変更し、担当者セルをロックします。
  */
 function colorizeSheet_(sheetObject) {
   const sheet = sheetObject.getSheet();
@@ -64,52 +59,115 @@ function colorizeSheet_(sheetObject) {
 
   if (lastRow < startRow) return;
 
-  // 必要な列のみ取得して処理を軽量化
-  const mgmtNoCol = indices.MGMT_NO || 0;
-  const progressCol = indices.PROGRESS || 0;
-  const tantoushaCol = indices.TANTOUSHA || 0;
-  const toiawaseCol = indices.TOIAWASE || 0;
-
-  if (!mgmtNoCol || !progressCol) return;
-
   const dataRows = lastRow - startRow + 1;
+  const lastCol = sheet.getLastColumn();
+  const fullRange = sheet.getRange(startRow, 1, dataRows, lastCol);
   
-  // バッチ処理で色を設定
-  const isMainOrView = sheetObject instanceof MainSheet || sheet.getName().startsWith('View_');
-  
-  // 進捗の色設定
-  if (progressCol > 0) {
-    const progressRange = sheet.getRange(startRow, progressCol, dataRows, 1);
-    const progressValues = progressRange.getValues();
-    const progressColors = progressValues.map(row => [getColor(PROGRESS_COLORS, safeTrim(row[0]))]);
-    progressRange.setBackgrounds(progressColors);
-    
-    // 管理No列も同じ色に
-    sheet.getRange(startRow, mgmtNoCol, dataRows, 1).setBackgrounds(progressColors);
-  }
-  
-  // メインシートとViewシートのみ担当者と問い合わせの色付け
-  if (isMainOrView) {
-    if (tantoushaCol > 0) {
-      const tantoushaRange = sheet.getRange(startRow, tantoushaCol, dataRows, 1);
-      const tantoushaValues = tantoushaRange.getValues();
-      const tantoushaColors = tantoushaValues.map(row => [getColor(TANTOUSHA_COLORS, safeTrim(row[0]))]);
-      tantoushaRange.setBackgrounds(tantoushaColors);
+  const values = fullRange.getValues();
+  const backgroundColors = fullRange.getBackgrounds();
+
+  // --- 列のインデックスを取得 ---
+  const mgmtNoCol = indices.MGMT_NO;
+  const progressCol = indices.PROGRESS;
+  const tantoushaCol = indices.TANTOUSHA;
+  const toiawaseCol = indices.TOIAWASE;
+  const kibanCol = indices.KIBAN;
+  const sagyouKubunCol = indices.SAGYOU_KUBUN;
+
+  const DUPLICATE_COLOR = '#cccccc'; // 灰色
+
+  const uniqueKeys = new Set();
+  const restrictedRanges = []; // 担当者入力を禁止するセルのリスト
+  const normalRanges = []; // 担当者入力を許可するセルのリスト
+
+  values.forEach((row, i) => {
+    let isDuplicate = false;
+    // --- 重複チェック ---
+    if (kibanCol && sagyouKubunCol) {
+      const kiban = safeTrim(row[kibanCol - 1]);
+      const sagyouKubun = safeTrim(row[sagyouKubunCol - 1]);
+      
+      if (kiban && sagyouKubun) {
+        const uniqueKey = `${kiban}_${sagyouKubun}`;
+        if (uniqueKeys.has(uniqueKey)) {
+          isDuplicate = true;
+        } else {
+          uniqueKeys.add(uniqueKey);
+        }
+      }
     }
     
-    if (toiawaseCol > 0) {
-      const toiawaseRange = sheet.getRange(startRow, toiawaseCol, dataRows, 1);
-      const toiawaseValues = toiawaseRange.getValues();
-      const toiawaseColors = toiawaseValues.map(row => [getColor(TOIAWASE_COLORS, safeTrim(row[0]))]);
-      toiawaseRange.setBackgrounds(toiawaseColors);
+    // --- 色と値の設定 ---
+    if (isDuplicate) {
+      //【重複時の処理】
+      // 1. 行全体を灰色にする
+      for (let j = 0; j < lastCol; j++) {
+        backgroundColors[i][j] = DUPLICATE_COLOR;
+      }
+      // 2. 進捗の値を「機番重複」に変更
+      if (progressCol) values[i][progressCol - 1] = "機番重複";
+      // 3. 担当者の値をクリア
+      if (tantoushaCol) values[i][tantoushaCol - 1] = "";
+      
+      // 4. メインシートの場合、担当者セルをロック対象に追加
+      if (sheetObject instanceof MainSheet && tantoushaCol) {
+        restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
+      }
+
+    } else {
+      //【通常時の処理】
+      // 1. 基本的な色付け
+      if (progressCol) {
+        const progressColor = getColor(PROGRESS_COLORS, safeTrim(row[progressCol - 1]));
+        backgroundColors[i][progressCol - 1] = progressColor;
+        if (mgmtNoCol) backgroundColors[i][mgmtNoCol - 1] = progressColor;
+      }
+      if (sheetObject instanceof MainSheet || sheet.getName().startsWith('View_')) {
+        if (tantoushaCol) backgroundColors[i][tantoushaCol - 1] = getColor(TANTOUSHA_COLORS, safeTrim(row[tantoushaCol - 1]));
+        if (toiawaseCol) backgroundColors[i][toiawaseCol - 1] = getColor(TOIAWASE_COLORS, safeTrim(row[toiawaseCol - 1]));
+      }
+      // 2. メインシートの場合、担当者セルをロック解除対象に追加
+      if (sheetObject instanceof MainSheet && tantoushaCol) {
+        normalRanges.push(sheet.getRange(startRow + i, tantoushaCol));
+      }
+    }
+  });
+
+  // --- 最後に色と値をまとめてシートに適用 ---
+  fullRange.setBackgrounds(backgroundColors);
+  fullRange.setValues(values);
+
+  // --- 担当者列の入力制限を適用 ---
+  if (sheetObject instanceof MainSheet) {
+    // 1. ロックするセルの設定
+    if (restrictedRanges.length > 0) {
+      const restrictedRule = SpreadsheetApp.newDataValidation()
+        .requireValueInRange(sheet.getRange('A1:A1'), false) // ダミーの参照範囲
+        .setAllowInvalid(false)
+        .setHelpText('この行は機番が重複しているため、担当者は設定できません。')
+        .build();
+      restrictedRanges.forEach(range => range.setDataValidation(restrictedRule));
+    }
+    // 2. ロックを解除するセルの設定
+    if (normalRanges.length > 0) {
+      const masterValues = getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER).flat();
+      if (masterValues.length > 0) {
+        const normalRule = SpreadsheetApp.newDataValidation()
+          .requireValueInList(masterValues)
+          .setAllowInvalid(false)
+          .build();
+        normalRanges.forEach(range => range.setDataValidation(normalRule));
+      }
     }
   }
 }
 
 /**
  * 工数シートの土日・祝日の日付列に背景色を設定します。
+ * (この関数は現在、パフォーマンス上の理由でcolorizeAllSheetsからは呼び出されていません)
  */
 function colorizeHolidayColumns_(inputSheetObject) {
+  // ... (この関数の内容は変更ありません)
   const sheet = inputSheetObject.getSheet();
   const lastCol = sheet.getLastColumn();
   const dateColumnStart = Object.keys(INPUT_SHEET_HEADERS).length + 1;
@@ -118,21 +176,16 @@ function colorizeHolidayColumns_(inputSheetObject) {
 
   const year = new Date().getFullYear();
   const holidays = getJapaneseHolidays(year);
-  // 来年の祝日も念のため取得
   const nextYearHolidays = getJapaneseHolidays(year + 1);
   nextYearHolidays.forEach(h => holidays.add(h));
-  
   const headerRange = sheet.getRange(1, dateColumnStart, 1, lastCol - dateColumnStart + 1);
   const headerDates = headerRange.getValues()[0];
   const backgrounds = [];
-
-  // 各日付列の背景色配列を作成
   for (let i = 0; i < headerDates.length; i++) {
     const currentCol = dateColumnStart + i;
     const date = headerDates[i];
     const color = (isValidDate(date) && isHoliday(date, holidays)) ? CONFIG.COLORS.WEEKEND_HOLIDAY : CONFIG.COLORS.DEFAULT_BACKGROUND;
     const colBackgrounds = Array(sheet.getMaxRows()).fill([color]);
-    // 2次元配列にするため、1列ずつ設定
     sheet.getRange(1, currentCol, sheet.getMaxRows()).setBackgrounds(colBackgrounds);
   }
 }
