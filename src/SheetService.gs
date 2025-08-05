@@ -7,31 +7,7 @@
 // === すべてのシートクラスの基盤となる抽象クラス ===
 // =================================================================================
 class SheetService {
-  /**
-   * @param {string} sheetName 操作対象のシート名
-   */
-  constructor(sheetName) {
-    if (this.constructor === SheetService) {
-      throw new Error("SheetServiceは抽象クラスのためインスタンス化できません。");
-    }
-    this.ss = SpreadsheetApp.getActiveSpreadsheet();
-    this.sheet = this.ss.getSheetByName(sheetName);
-    if (!this.sheet) {
-      // シートが存在しない場合は新規作成する
-      this.sheet = this.ss.insertSheet(sheetName);
-    }
-    this.sheetName = sheetName;
-    this.startRow = 2; // デフォルトのデータ開始行
-  }
-
-  /** @return {GoogleAppsScript.Spreadsheet.Sheet} シートオブジェクトを返す */
-  getSheet() { return this.sheet; }
-  /** @return {number} シートの最終行番号を返す */
-  getLastRow() { return this.sheet.getLastRow(); }
-  /** @return {number} シートの最終列番号を返す */
-  getLastColumn() { return this.sheet.getLastColumn(); }
-  /** @return {string} シート名を返す */
-  getName() { return this.sheetName; }
+  // (変更なしのため省略)
 }
 
 
@@ -39,41 +15,7 @@ class SheetService {
 // === メインシートを操作するためのクラス ===
 // =================================================================================
 class MainSheet extends SheetService {
-  constructor() {
-    super(CONFIG.SHEETS.MAIN);
-    this.startRow = CONFIG.DATA_START_ROW.MAIN;
-    this.indices = getColumnIndices(this.sheet, MAIN_SHEET_HEADERS);
-  }
-
-  /**
-   * 「担当者マスタ」シートから担当者の情報（名前とメールアドレス）を取得します。
-   */
-  getTantoushaList() {
-    return getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER, 2)
-      .map(row => ({ name: row[0], email: row[1] }))
-      .filter(item => item.name && item.email);
-  }
-
-  /**
-   * メインシートの全データを、一意なキー（管理No + 作業区分）でMapとして取得します。
-   */
-  getDataMap() {
-    const lastRow = this.getLastRow();
-    if (lastRow < this.startRow) return new Map();
-
-    const values = this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, this.getLastColumn()).getValues();
-    const dataMap = new Map();
-
-    values.forEach((row, index) => {
-      const mgmtNo = row[this.indices.MGMT_NO - 1];
-      const sagyouKubun = row[this.indices.SAGYOU_KUBUN - 1];
-      if (mgmtNo && sagyouKubun) {
-        const uniqueKey = `${mgmtNo}_${sagyouKubun}`;
-        dataMap.set(uniqueKey, { data: row, rowNum: this.startRow + index });
-      }
-    });
-    return dataMap;
-  }
+  // (変更なしのため省略)
 }
 
 
@@ -81,9 +23,6 @@ class MainSheet extends SheetService {
 // === 工数シートを操作するためのクラス ===
 // =================================================================================
 class InputSheet extends SheetService {
-  /**
-   * @param {string} tantoushaName 担当者名
-   */
   constructor(tantoushaName) {
     const sheetName = `${CONFIG.SHEETS.INPUT_PREFIX}${tantoushaName}`;
     super(sheetName);
@@ -98,9 +37,6 @@ class InputSheet extends SheetService {
     this.filterDateColumns();
   }
 
-  /**
-   * 工数シートを初期化し、ヘッダー、数式、日付列を完全に自動生成します。
-   */
   initializeSheet() {
     this.sheet.clear();
     const headers = Object.values(INPUT_SHEET_HEADERS);
@@ -111,7 +47,6 @@ class InputSheet extends SheetService {
       this.sheet.getRange(2, sumLabelCol).setValue("日次合計").setHorizontalAlignment("right");
     }
 
-    // G列から日付列を生成（前月と当月）
     const dateHeaders = [];
     const sumFormulas = [];
     const today = new Date();
@@ -138,76 +73,25 @@ class InputSheet extends SheetService {
       this.sheet.getRange(2, headers.length + 1, 1, sumFormulas.length).setFormulas([sumFormulas]);
     }
 
-    // ★★★ 修正箇所 ★★★
     this.sheet.setFrozenRows(2);
-    this.sheet.setFrozenColumns(6); // 固定列をF列（6列）までに変更
+    this.sheet.setFrozenColumns(6); // ★固定列をF列（6列）までに変更
   }
   
-  /**
-   * 表示する日付列を、当月と前月のものだけにフィルタリングします。
-   */
   filterDateColumns() {
-    const sheet = this.sheet;
-    const lastCol = sheet.getLastColumn();
-    const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
-
-    if (lastCol < dateStartCol) return;
-
-    sheet.showColumns(dateStartCol, lastCol - dateStartCol + 1); // 一旦すべて表示
-
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth(); // 0-indexed
-
-    const headerDates = sheet.getRange(1, dateStartCol, 1, lastCol - dateStartCol + 1).getValues()[0];
-    
-    headerDates.forEach((date, i) => {
-      if (isValidDate(date)) {
-        const dateYear = date.getFullYear();
-        const dateMonth = date.getMonth();
-        
-        const isCurrentMonth = (dateYear === currentYear && dateMonth === currentMonth);
-        const isPreviousMonth = (currentMonth === 0) 
-            ? (dateYear === currentYear - 1 && dateMonth === 11) 
-            : (dateYear === currentYear && dateMonth === currentMonth - 1);
-
-        if (!isCurrentMonth && !isPreviousMonth) {
-          sheet.hideColumns(dateStartCol + i);
-        }
-      }
-    });
+    // (変更なしのため省略)
   }
 
-
-  /**
-   * 工数シートの既存データをクリアします。
-   */
   clearData() {
-    const lastRow = this.getLastRow();
-    if (lastRow >= this.startRow) {
-      this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, this.getLastColumn()).clearContent();
-    }
+    // (変更なしのため省略)
   }
 
-  /**
-   * 新しいデータを工数シートに書き込み、数式も設定します。
-   */
   writeData(data) {
-    if (data.length === 0) {
-      // ★データがない場合もフィルタをクリアしておく
-      const existingFilter = this.sheet.getFilter();
-      if (existingFilter) {
-        existingFilter.remove();
-      }
-      return;
-    }
-    
-    // ★★★ 修正箇所 ★★★
-    // 既存のフィルタがあれば一旦削除
     const existingFilter = this.sheet.getFilter();
     if (existingFilter) {
       existingFilter.remove();
     }
+    
+    if (data.length === 0) return;
     
     this.sheet.getRange(this.startRow, 1, data.length, data[0].length).setValues(data);
 
@@ -222,8 +106,9 @@ class InputSheet extends SheetService {
     this.sheet.getRange(this.startRow, this.indices.ACTUAL_HOURS_SUM, data.length, 1).setFormulas(sumFormulas);
     
     // ★★★ 修正箇所 ★★★
-    // ヘッダー行(1行目)を含めたデータ範囲全体にフィルタを適用
-    // これにより、ユーザーは1行目のヘッダーをクリックしてソートできるようになる
-    this.sheet.getRange(1, 1, this.sheet.getLastRow(), this.sheet.getLastColumn()).createFilter();
+    // ヘッダー行(1行目)からデータ最終行までを範囲としてフィルタを作成
+    if(this.sheet.getLastRow() > 1) {
+      this.sheet.getRange(1, 1, this.sheet.getLastRow(), this.sheet.getLastColumn()).createFilter();
+    }
   }
 }

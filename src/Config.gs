@@ -1,7 +1,6 @@
 /**
  * Config.gs
  * システム全体の設定定数を管理します。
- * 将来の仕様変更に対応できるよう、設定はここに集約されています。
  */
 
 // =================================================================================
@@ -28,20 +27,20 @@ const CONFIG = {
 
   // 色設定
   COLORS: {
-    DEFAULT_BACKGROUND: '#ffffff', // デフォルトの背景色
-    WEEKEND_HOLIDAY:    '#f2f2f2', // 休日の背景色
+    DEFAULT_BACKGROUND: '#ffffff',
+    WEEKEND_HOLIDAY:    '#f2f2f2',
   },
 
   // データ開始行
   DATA_START_ROW: {
-    MAIN: 2,  // メインシートのデータは2行目から
-    INPUT: 3  // 工数シートのデータは3行目から
+    MAIN: 2,
+    INPUT: 3
   },
 
   // バックアップ設定
   BACKUP: {
-    KEEP_COUNT: 5,               // 保持するバックアップ数
-    PREFIX:     "【Backup】"     // バックアップファイル名の接頭辞
+    KEEP_COUNT: 5,
+    PREFIX:     "【Backup】"
   },
 
   // 日本の祝日カレンダーID
@@ -51,7 +50,6 @@ const CONFIG = {
 // =================================================================================
 // === 動的な色設定（マスタ連動） ===
 // =================================================================================
-// マスタに新しいステータスを追加した場合、ここに色定義を追加するだけで対応できます。
 const PROGRESS_COLORS = new Map([
   ["未着手", "#ffcdd2"],
   ["仕掛中", "#e1bee7"],
@@ -104,6 +102,7 @@ const MAIN_SHEET_HEADERS = {
 };
 
 /**
+ * ★★★ 修正箇所 ★★★
  * 工数シートの列定義
  */
 const INPUT_SHEET_HEADERS = {
@@ -113,7 +112,8 @@ const INPUT_SHEET_HEADERS = {
   PROGRESS:     "進捗",
   PLANNED_HOURS:"予定工数",
   ACTUAL_HOURS_SUM: "実績工数合計",
-  // G列以降は動的な日付列
+  SEPARATOR:    "", // ★G列の空白列を定義
+  // H列以降は動的な日付列
 };
 
 
@@ -139,7 +139,8 @@ function getColumnIndices(sheet, headerDef) {
   const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   const indices = {};
   for (const [key, headerName] of Object.entries(headerDef)) {
-    const index = headerRow.indexOf(headerName) + 1;
+    // 空白ヘッダーも許容するように修正
+    const index = headerRow.findIndex(h => h === headerName) + 1;
     if (index > 0) {
       indices[key] = index;
     }
