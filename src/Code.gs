@@ -210,3 +210,11 @@ function checkMyEmail() {
   const userEmail = Session.getActiveUser().getEmail();
   SpreadsheetApp.getUi().alert(`スクリプトが認識しているメールアドレスは以下です：\n\n${userEmail}`);
 }
+
+/**
+ * 【デバッグ用】スクリプトが記憶しているキャッシュをすべて強制的にクリアします。
+ */
+function clearCache() {
+  CacheService.getScriptCache().removeAll();
+  SpreadsheetApp.getUi().alert('スクリプトのキャッシュをクリアしました。');
+}
