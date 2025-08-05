@@ -64,7 +64,7 @@ function colorizeSheet_(sheetObject) {
   const formulas = fullRange.getFormulas();
   const backgroundColors = fullRange.getBackgrounds();
   
-  // シートに書き戻すための配列を準備
+  // シートに書き戻すための配列を準備 (displayValuesをディープコピー)
   const outputValues = JSON.parse(JSON.stringify(displayValues));
 
   const mgmtNoCol = indices.MGMT_NO;
@@ -105,6 +105,11 @@ function colorizeSheet_(sheetObject) {
         restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
       }
     } else {
+      // 既存の色をリセットしないように、デフォルトの色は白にする
+      for (let j = 0; j < lastCol; j++) {
+          backgroundColors[i][j] = CONFIG.COLORS.DEFAULT_BACKGROUND;
+      }
+
       if (progressCol) {
         const progressColor = getColor(PROGRESS_COLORS, safeTrim(row[progressCol - 1]));
         backgroundColors[i][progressCol - 1] = progressColor;
@@ -135,7 +140,7 @@ function colorizeSheet_(sheetObject) {
   if (sheetObject instanceof MainSheet) {
     if (restrictedRanges.length > 0) {
       const restrictedRule = SpreadsheetApp.newDataValidation()
-        .requireValueInRange(sheet.getRange('A1:A1'), false) // ダミーの参照範囲
+        .requireValueInRange(sheet.getRange('A1:A1'), false)
         .setAllowInvalid(false)
         .setHelpText('この行は機番が重複しているため、担当者は設定できません。')
         .build();
@@ -149,6 +154,9 @@ function colorizeSheet_(sheetObject) {
           .setAllowInvalid(false)
           .build();
         normalRanges.forEach(range => range.setDataValidation(normalRule));
+      } else {
+         // マスタが空の場合も入力規則をクリア
+         normalRanges.forEach(range => range.clearDataValidations());
       }
     }
   }
@@ -162,24 +170,18 @@ function colorizeHolidayColumns_(inputSheetObject) {
   const sheet = inputSheetObject.getSheet();
   const lastCol = sheet.getLastColumn();
   const dateColumnStart = Object.keys(INPUT_SHEET_HEADERS).length + 1;
-
   if (lastCol < dateColumnStart) return;
-
   const year = new Date().getFullYear();
   const holidays = getJapaneseHolidays(year);
-  // 来年の祝日も念のため取得
   const nextYearHolidays = getJapaneseHolidays(year + 1);
   nextYearHolidays.forEach(h => holidays.add(h));
   const headerRange = sheet.getRange(1, dateColumnStart, 1, lastCol - dateColumnStart + 1);
   const headerDates = headerRange.getValues()[0];
-  const backgrounds = [];
-  // 各日付列の背景色配列を作成
   for (let i = 0; i < headerDates.length; i++) {
     const currentCol = dateColumnStart + i;
     const date = headerDates[i];
     const color = (isValidDate(date) && isHoliday(date, holidays)) ? CONFIG.COLORS.WEEKEND_HOLIDAY : CONFIG.COLORS.DEFAULT_BACKGROUND;
     const colBackgrounds = Array(sheet.getMaxRows()).fill([color]);
-    // 2次元配列にするため、1列ずつ設定
     sheet.getRange(1, currentCol, sheet.getMaxRows()).setBackgrounds(colBackgrounds);
   }
 }
