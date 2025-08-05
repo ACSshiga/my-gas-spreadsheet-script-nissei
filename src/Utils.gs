@@ -42,7 +42,6 @@ function getJapaneseHolidays(year) {
     const endDate = new Date(year, 11, 31);
     const events = calendar.getEvents(startDate, endDate);
     const holidays = new Set(events.map(e => formatDateForComparison(e.getStartTime())));
-
     cache.put(cacheKey, JSON.stringify([...holidays]), 21600); // 6時間キャッシュ
     return holidays;
   } catch (e) {
@@ -122,7 +121,6 @@ function getMasterData(masterSheetName, numColumns = 1) {
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(masterSheetName);
   if (!sheet) return [];
-  
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
@@ -151,4 +149,22 @@ function getTantoushaNameByEmail(email) {
 function logWithTimestamp(message) {
   const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), DATE_FORMATS.DATETIME);
   console.log(`[${timestamp}] ${message}`);
+}
+
+// =================================================================================
+// === ★★★ 新規追加 ★★★ ===
+// =================================================================================
+/**
+ * スクリプトが使用するすべてのキャッシュを削除します。
+ * カスタムメニューから実行できます。
+ */
+function clearScriptCache() {
+  try {
+    CacheService.getScriptCache().removeAll();
+    SpreadsheetApp.getActiveSpreadsheet().toast('スクリプトのキャッシュをクリアしました。', '完了', 3);
+    logWithTimestamp("スクリプトのキャッシュがクリアされました。");
+  } catch (e) {
+    SpreadsheetApp.getActiveSpreadsheet().toast(`キャッシュのクリア中にエラーが発生しました: ${e.message}`, 'エラー', 5);
+    Logger.log(`キャッシュのクリア中にエラー: ${e.message}`);
+  }
 }

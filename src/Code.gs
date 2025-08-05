@@ -27,6 +27,8 @@ function onOpen(e) {
     .addSeparator()
     .addItem('全資料フォルダ作成', 'bulkCreateMaterialFolders')
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
+    .addSeparator() // ★★★ 追加 ★★★
+    .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache') // ★★★ 追加 ★★★
     .addToUi();
   setupAllDataValidations();
   
@@ -42,7 +44,6 @@ function onOpen(e) {
  */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
-
   // 処理が重複しないようにロックをかける
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) { // 10秒待ってもロックが取れなければ終了
