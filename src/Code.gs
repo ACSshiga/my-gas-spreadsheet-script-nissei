@@ -337,15 +337,24 @@ function colorizeSheet_(sheetObject) {
           if(!formulas[i][j]) backgroundColors[i][j] = CONFIG.COLORS.DEFAULT_BACKGROUND;
       }
 
+      // ▼▼▼ ここから修正 ▼▼▼
       if (progressCol) {
-        const progressColor = getColor(PROGRESS_COLORS, safeTrim(row[progressCol - 1]));
+        const progressValue = safeTrim(row[progressCol - 1]);
+        let progressColor;
+
+        if (progressValue === "") {
+            // 進捗が空欄の場合はデフォルトの色（白）にする
+            progressColor = CONFIG.COLORS.DEFAULT_BACKGROUND;
+        } else {
+            // 進捗に値がある場合は、定義された色を取得する
+            progressColor = getColor(PROGRESS_COLORS, progressValue);
+        }
+        
         backgroundColors[i][progressCol - 1] = progressColor;
         if (mgmtNoCol) backgroundColors[i][mgmtNoCol - 1] = progressColor;
       }
+      // ▲▲▲ ここまで修正 ▲▲▲
 
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-      // ★★★ ここが「作業区分」の色付けをしている部分です ★★★
-      // ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
       if (sagyouKubunCol) {
         const sagyouKubunColor = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]));
         backgroundColors[i][sagyouKubunCol - 1] = sagyouKubunColor;
