@@ -17,23 +17,23 @@ function colorizeAllSheets() {
     const mainSheet = new MainSheet();
     colorizeSheet_(mainSheet);
 
-    const tantoushaList = mainSheet.getTantoushaList();
-    tantoushaList.forEach(tantousha => {
-      try {
-        const inputSheet = new InputSheet(tantousha.name);
-        colorizeSheet_(inputSheet);
-        colorizeHolidayColumns_(inputSheet);
-      } catch (e) {
-        // シートが存在しない場合はスキップ
-      }
-    });
-    
-    // Viewシートの色付けを追加
+    // 工数シートの色付けは、存在するシートのみ処理
     const allSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
     allSheets.forEach(sheet => {
-      if (sheet.getName().startsWith('View_')) {
+      const sheetName = sheet.getName();
+      if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
         try {
-          // Viewシート用の一時的なMainSheetオブジェクトを作成
+          const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
+          const inputSheet = new InputSheet(tantoushaName);
+          colorizeSheet_(inputSheet);
+          // 土日祝日の色付けは一旦スキップ（重い処理のため）
+          // colorizeHolidayColumns_(inputSheet);
+        } catch (e) {
+          // エラーは無視
+        }
+      } else if (sheetName.startsWith('View_')) {
+        try {
+          // Viewシート用の簡易オブジェクト
           const viewSheetObj = {
             getSheet: () => sheet,
             indices: getColumnIndices(sheet, MAIN_SHEET_HEADERS),
@@ -42,7 +42,7 @@ function colorizeAllSheets() {
           };
           colorizeSheet_(viewSheetObj);
         } catch (e) {
-          Logger.log(`Viewシート ${sheet.getName()} の色付けエラー: ${e.message}`);
+          Logger.log(`Viewシート ${sheetName} の色付けエラー: ${e.message}`);
         }
       }
     });
@@ -64,29 +64,46 @@ function colorizeSheet_(sheetObject) {
 
   if (lastRow < startRow) return;
 
-  const range = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn());
-  const values = range.getValues();
-  // 現在の背景色を取得して、必要な部分だけ変更する
-  const backgroundColors = range.getBackgrounds();
+  // 必要な列のみ取得して処理を軽量化
+  const mgmtNoCol = indices.MGMT_NO || 0;
+  const progressCol = indices.PROGRESS || 0;
+  const tantoushaCol = indices.TANTOUSHA || 0;
+  const toiawaseCol = indices.TOIAWASE || 0;
 
-  values.forEach((row, i) => {
-    // メインシートの場合のみ、担当者と問い合わせの色付けを行う
-    if (sheetObject instanceof MainSheet || sheet.getName().startsWith('View_')) {
-      const tantousha = safeTrim(row[indices.TANTOUSHA - 1]);
-      const toiawase = safeTrim(row[indices.TOIAWASE - 1]);
-      backgroundColors[i][indices.TANTOUSHA - 1] = getColor(TANTOUSHA_COLORS, tantousha);
-      backgroundColors[i][indices.TOIAWASE - 1] = getColor(TOIAWASE_COLORS, toiawase);
+  if (!mgmtNoCol || !progressCol) return;
+
+  const dataRows = lastRow - startRow + 1;
+  
+  // バッチ処理で色を設定
+  const isMainOrView = sheetObject instanceof MainSheet || sheet.getName().startsWith('View_');
+  
+  // 進捗の色設定
+  if (progressCol > 0) {
+    const progressRange = sheet.getRange(startRow, progressCol, dataRows, 1);
+    const progressValues = progressRange.getValues();
+    const progressColors = progressValues.map(row => [getColor(PROGRESS_COLORS, safeTrim(row[0]))]);
+    progressRange.setBackgrounds(progressColors);
+    
+    // 管理No列も同じ色に
+    sheet.getRange(startRow, mgmtNoCol, dataRows, 1).setBackgrounds(progressColors);
+  }
+  
+  // メインシートとViewシートのみ担当者と問い合わせの色付け
+  if (isMainOrView) {
+    if (tantoushaCol > 0) {
+      const tantoushaRange = sheet.getRange(startRow, tantoushaCol, dataRows, 1);
+      const tantoushaValues = tantoushaRange.getValues();
+      const tantoushaColors = tantoushaValues.map(row => [getColor(TANTOUSHA_COLORS, safeTrim(row[0]))]);
+      tantoushaRange.setBackgrounds(tantoushaColors);
     }
     
-    // 両シート共通の色付け
-    const progress = safeTrim(row[indices.PROGRESS - 1]);
-    const progressColor = getColor(PROGRESS_COLORS, progress);
-    backgroundColors[i][indices.MGMT_NO - 1] = progressColor; // 管理No.列
-    backgroundColors[i][indices.PROGRESS - 1] = progressColor; // 進捗列
-  });
-
-  // 色情報をまとめて一度に設定
-  range.setBackgrounds(backgroundColors);
+    if (toiawaseCol > 0) {
+      const toiawaseRange = sheet.getRange(startRow, toiawaseCol, dataRows, 1);
+      const toiawaseValues = toiawaseRange.getValues();
+      const toiawaseColors = toiawaseValues.map(row => [getColor(TOIAWASE_COLORS, safeTrim(row[0]))]);
+      toiawaseRange.setBackgrounds(toiawaseColors);
+    }
+  }
 }
 
 /**
