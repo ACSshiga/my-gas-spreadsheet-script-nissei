@@ -97,7 +97,7 @@ function getColorMapFromMaster(sheetName, keyColIndex, colorColIndex) {
   const masterData = getMasterData(sheetName);
   const colorMap = new Map(
     masterData
-      .filter(row => row[colorColIndex]) // カラーコードが空でない行のみ対象
+      .filter(row => row[colorColIndex])
       .map(row => [row[keyColIndex], row[colorColIndex]])
   );
 
@@ -105,10 +105,6 @@ function getColorMapFromMaster(sheetName, keyColIndex, colorColIndex) {
   return colorMap;
 }
 
-// ★★★ ここから新規追加 ★★★
-/**
- * 進捗マスタから「完了日トリガー」がTRUEのステータスリストを取得します。
- */
 function getCompletionTriggerStatuses() {
   const cache = CacheService.getScriptCache();
   const cacheKey = 'completion_trigger_statuses';
@@ -117,15 +113,35 @@ function getCompletionTriggerStatuses() {
     return JSON.parse(cached);
   }
 
-  const masterData = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER, 3); // 3列目まで取得
+  const masterData = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER, 3);
   const triggerStatuses = masterData
-    .filter(row => row[2] === true) // 完了日トリガーがTRUEの行をフィルタリング
+    .filter(row => row[2] === true) 
+    .map(row => row[0]);
+
+  cache.put(cacheKey, JSON.stringify(triggerStatuses), 3600);
+  return triggerStatuses;
+}
+
+/**
+ * 進捗マスタから「仕掛日トリガー」がTRUEのステータスリストを取得します。
+ */
+function getStartDateTriggerStatuses() {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'startdate_trigger_statuses';
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  const masterData = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER, 4); // 4列目まで取得
+  const triggerStatuses = masterData
+    .filter(row => row[3] === true) // 仕掛日トリガーがTRUEの行をフィルタリング
     .map(row => row[0]);             // 進捗名（1列目）だけを抽出
 
   cache.put(cacheKey, JSON.stringify(triggerStatuses), 3600); // 1時間キャッシュ
   return triggerStatuses;
 }
-// ★★★ ここまで新規追加 ★★★
+
 
 function getTantoushaNameByEmail(email) {
   if (!email) return null;
