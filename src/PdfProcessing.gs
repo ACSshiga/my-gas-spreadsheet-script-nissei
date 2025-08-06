@@ -7,10 +7,10 @@
  * 指定されたGoogle DriveフォルダからPDFファイルを一括でインポートします。
  */
 function importFromDriveFolder() {
-  const ui = SpreadsheetApp.getUi(); // ★★★ UI操作用の変数を最初に定義 ★★★
+  const ui = SpreadsheetApp.getUi();
   try {
-    if (CONFIG.FOLDERS.IMPORT_SOURCE_FOLDER === "ここに「申請書インポート用」のIDを貼り付け" || 
-        CONFIG.FOLDERS.PROCESSED_FOLDER === "ここに「処理済み申請書」のIDを貼り付け") {
+    if (CONFIG.FOLDERS.IMPORT_SOURCE_FOLDER.includes("貼り付け") || 
+        CONFIG.FOLDERS.PROCESSED_FOLDER.includes("貼り付け")) {
       ui.alert('エラー: Config.gsファイルにインポート用のフォルダIDが正しく設定されていません。');
       return;
     }
@@ -40,7 +40,6 @@ function importFromDriveFolder() {
 
     filesForProcessing.forEach(file => {
       const text = extractTextFromPdf(file);
-      
       const applications = text.split(/設計業務の外注委託申請書|--- PAGE \d+ ---/).filter(s => s.trim().length > 10);
       if (applications.length === 0) return;
 
@@ -48,9 +47,9 @@ function importFromDriveFolder() {
         const mgmtNo = getValue(appText, /管理No\.\s*(\S+)/);
         if (!mgmtNo) return;
 
-        const kishu = getValue(appText, /機種:\s*(.*?)(?=\s*機番:|\n)/s);
-        const kiban = getValue(appText, /機番:\s*(.*?)(?=\s*納入先:|\n)/s);
-        const nounyusaki = getValue(appText, /納入先:\s*(.*?)(?=\n|・機械納期:)/s);
+        const kishu = getValue(appText, /機種:\s*([\s\S]*?)(?=\s*機番:)/);
+        const kiban = getValue(appText, /機番:\s*([\s\S]*?)(?=\s*納入先:)/);
+        const nounyusaki = getValue(appText, /納入先:\s*([\s\S]*?)(?=\n|・機械納期:|入庫予定日:|・設計予定期間:)/);
         
         const kikanMatch = appText.match(/設計予定期間:?\s*(\d+\s*月\s*\d+\s*日)\s*~\s*(\d+\s*月\s*\d+\s*日)/);
         const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace(/\s/g, '').replace('月', '/').replace('日', '')}` : '';
@@ -62,7 +61,7 @@ function importFromDriveFolder() {
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
         } else {
-          const yoteiKousu = getValue(appText, /見積設計工数:\s*(\d+)/);
+          const yoteiKousu = getValue(appText, /見積設計工数:\s*(\d+)/) || getValue(appText, /(\d+)\s*Η/);
           const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
           
           let sagyouKubun = '盤配';
@@ -85,15 +84,11 @@ function importFromDriveFolder() {
       const sheet = mainSheet.getSheet();
       const lastRow = sheet.getLastRow();
       sheet.getRange(lastRow + 1, 1, allNewRows.length, allNewRows[0].length).setValues(allNewRows);
-      // ★★★ ここから修正 ★★★
-      ui.toast(`${totalImportedCount}個のファイルから ${allNewRows.length}件のデータをインポートしました。`);
-      // ★★★ ここまで修正 ★★★
+      ui.alert(`${totalImportedCount}個のファイルから ${allNewRows.length}件のデータをインポートしました。`);
       syncDefaultProgressToMain();
       colorizeAllSheets();
     } else if (totalImportedCount > 0) {
-      // ★★★ ここから修正 ★★★
-      ui.toast(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。`);
-      // ★★★ ここまで修正 ★★★
+      ui.alert(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。PDFのレイアウトが特殊な可能性があります。`);
     }
 
   } catch (e) {
@@ -122,13 +117,12 @@ function extractTextFromPdf(file) {
   }
 }
 
-
 /**
  * テキストから正規表現で値を抽出するヘルパー関数
  */
 function getValue(text, regex) {
   const match = text.match(regex);
-  return match && match[1] ? match[1].replace(/[\n\r\t]/g, ' ').trim() : '';
+  return match && match[1] ? match[1].replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim() : '';
 }
 
 /**
