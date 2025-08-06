@@ -21,9 +21,11 @@ class SheetService {
   }
 
   getSheet() { return this.sheet; }
-  getLastRow() { return this.sheet.getLastRow(); }
+  getLastRow() { return this.sheet.getLastRow();
+  }
   getLastColumn() { return this.sheet.getLastColumn(); }
-  getName() { return this.sheetName; }
+  getName() { return this.sheetName;
+  }
 }
 
 

@@ -70,7 +70,6 @@ function syncInputToMain(inputSheetName, editedRange) {
   const editedRowValues = inputSheet.sheet.getRange(editedRow, 1, 1, inputSheet.getLastColumn()).getValues()[0];
   const inputIndices = inputSheet.indices;
   const mainIndices = mainSheet.indices;
-
   const mgmtNo = editedRowValues[inputIndices.MGMT_NO - 1];
   const sagyouKubun = editedRowValues[inputIndices.SAGYOU_KUBUN - 1];
   const uniqueKey = `${mgmtNo}_${sagyouKubun}`;
@@ -79,11 +78,9 @@ function syncInputToMain(inputSheetName, editedRange) {
 
   const valuesToUpdate = {};
   const editedCol = editedRange.getColumn();
-
   if (editedCol === inputIndices.PROGRESS) {
     const newProgress = editedRowValues[inputIndices.PROGRESS - 1];
     valuesToUpdate[mainIndices.PROGRESS] = newProgress;
-    
     // 仕掛日と完了日の自動記録
     const completionTriggers = getCompletionTriggerStatuses();
     const startDateTriggers = getStartDateTriggerStatuses();
@@ -145,7 +142,6 @@ function syncDefaultProgressToMain() {
       hasUpdate = true;
     }
   });
-  
   if(hasUpdate) {
     range.setValues(mainData);
   }

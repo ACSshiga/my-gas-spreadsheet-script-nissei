@@ -29,7 +29,7 @@ function updateBillingSheet(selectedMonth) {
       mainSheet.getLastRow() - mainSheet.startRow + 1,
       mainSheet.getLastColumn()
     ).getValues();
-    
+
     // 選択された月に完了した案件のみをフィルタリング
     const [year, month] = selectedMonth.split('-').map(Number);
     const billingData = mainData.filter(row => {
@@ -39,7 +39,7 @@ function updateBillingSheet(selectedMonth) {
       }
       return false;
     });
-    
+
     // 請求シートに書き出すためのデータに整形
     const dataForBillingSheet = billingData.map(row => {
       return [

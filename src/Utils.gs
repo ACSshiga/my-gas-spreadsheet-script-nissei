@@ -79,7 +79,6 @@ function getMasterData(masterSheetName, numColumns) {
 
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-
   const values = sheet.getRange(2, 1, lastRow - 1, colsToFetch).getValues();
   return values.filter(row => row[0] !== "");
 }
@@ -100,7 +99,6 @@ function getColorMapFromMaster(sheetName, keyColIndex, colorColIndex) {
       .filter(row => row[colorColIndex])
       .map(row => [row[keyColIndex], row[colorColIndex]])
   );
-
   cache.put(cacheKey, JSON.stringify([...colorMap]), 3600);
   return colorMap;
 }
@@ -117,7 +115,6 @@ function getCompletionTriggerStatuses() {
   const triggerStatuses = masterData
     .filter(row => row[2] === true) 
     .map(row => row[0]);
-
   cache.put(cacheKey, JSON.stringify(triggerStatuses), 3600);
   return triggerStatuses;
 }
@@ -133,10 +130,12 @@ function getStartDateTriggerStatuses() {
     return JSON.parse(cached);
   }
 
-  const masterData = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER, 4); // 4列目まで取得
+  const masterData = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER, 4);
+  // 4列目まで取得
   const triggerStatuses = masterData
     .filter(row => row[3] === true) // 仕掛日トリガーがTRUEの行をフィルタリング
-    .map(row => row[0]);             // 進捗名（1列目）だけを抽出
+    .map(row => row[0]);
+  // 進捗名（1列目）だけを抽出
 
   cache.put(cacheKey, JSON.stringify(triggerStatuses), 3600); // 1時間キャッシュ
   return triggerStatuses;
@@ -148,7 +147,8 @@ function getTantoushaNameByEmail(email) {
   const userEmail = email.trim();
   const masterData = getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER, 2);
   const user = masterData.find(row => String(row[1]).trim() === userEmail);
-  return user ? user[0] : null;
+  return user ?
+  user[0] : null;
 }
 
 function logWithTimestamp(message) {

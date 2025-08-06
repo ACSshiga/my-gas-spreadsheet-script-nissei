@@ -10,9 +10,6 @@
 function onOpen(e) {
   const ui = SpreadsheetApp.getUi();
   const menu = ui.createMenu('カスタムメニュー');
-  // ▼▼▼ この1行を追加 ▼▼▼
-  menu.addItem('【診断】フォルダ作成のチェック', 'advancedFolderCreationCheck');
-  // ▲▲▲ この1行を追加 ▲▲
   const activeSheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   
   if (activeSheet.getName() === CONFIG.SHEETS.MAIN || activeSheet.getName().startsWith('View_')) {
@@ -36,7 +33,6 @@ function onOpen(e) {
     .addSeparator()
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
-  
   setupAllDataValidations();
   syncDefaultProgressToMain();
   colorizeAllSheets();
@@ -62,7 +58,6 @@ function onEdit(e) {
   }
   
   const ss = e.source;
-
   try {
     setupAllDataValidations(); 
 
@@ -243,6 +238,7 @@ function setupAllDataValidations() {
 
             if(progressCol && lastRow >= inputSheet.startRow) 
             {
+ 
               sheet.getRange(inputSheet.startRow, progressCol, lastRow - inputSheet.startRow + 1).setDataValidation(progressRule);
             }
           } catch(e) {
@@ -263,7 +259,6 @@ function setupAllDataValidations() {
 function colorizeAllSheets() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    
     const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
     if (mainSheet) {
       colorizeSheet_(new MainSheet());
@@ -279,6 +274,7 @@ function colorizeAllSheets() {
         } catch (e) { /* エラーは無視 */ }
       } else if (sheetName.startsWith('View_')) {
         try {
+     
           const viewSheetObj = {
             getSheet: () => sheet,
             indices: getColumnIndices(sheet, MAIN_SHEET_HEADERS),
@@ -287,6 +283,7 @@ function colorizeAllSheets() {
           };
           colorizeSheet_(viewSheetObj);
         } catch (e) {
+    
           Logger.log(`Viewシート ${sheetName} の色付けエラー: ${e.message}`);
         }
       }
@@ -302,12 +299,10 @@ function colorizeSheet_(sheetObject) {
   const TANTOUSHA_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TANTOUSHA_MASTER, 0, 2);
   const SAGYOU_KUBUN_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, 0, 1);
   const TOIAWASE_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TOIAWASE_MASTER, 0, 1);
-
   const sheet = sheetObject.getSheet();
   const indices = sheetObject.indices;
   const lastRow = sheetObject.getLastRow();
   const startRow = sheetObject.startRow;
-
   if (lastRow < startRow) return;
   const dataRows = lastRow - startRow + 1;
   const lastCol = sheet.getLastColumn();
@@ -315,7 +310,6 @@ function colorizeSheet_(sheetObject) {
   const displayValues = fullRange.getDisplayValues();
   const formulas = fullRange.getFormulas();
   const backgroundColors = fullRange.getBackgrounds();
-  
   const outputValues = JSON.parse(JSON.stringify(displayValues));
 
   const mgmtNoCol = indices.MGMT_NO;
@@ -339,6 +333,7 @@ function colorizeSheet_(sheetObject) {
         const uniqueKey = `${kiban}_${sagyouKubun}`;
         if (uniqueKeys.has(uniqueKey)) {
           isDuplicate = true;
+   
         } else {
           uniqueKeys.add(uniqueKey);
         }
@@ -414,82 +409,5 @@ function colorizeSheet_(sheetObject) {
          normalRanges.forEach(range => range.clearDataValidations());
       }
     }
-  }
-}
-
-/**
- * 【最終診断用】シートのデータ内容を詳細にログ出力する関数です。
- * これを実行した後、ログを確認してください。
- */
-function advancedFolderCreationCheck() {
-  const ui = SpreadsheetApp.getUi();
-  // ログ出力の開始を宣言
-  Logger.log("========= 最終診断を開始します =========");
-  try {
-    const mainSheet = new MainSheet();
-    const sheet = mainSheet.getSheet();
-    const startRow = mainSheet.startRow;
-    const lastRow = sheet.getLastRow();
-
-    // データ行の存在チェック
-    if (lastRow < startRow) {
-      Logger.log("診断終了: データが1行も入力されていません。");
-      ui.alert('【診断結果】データが1行も入力されていません。');
-      return;
-    }
-
-    const indices = mainSheet.indices;
-    // 必須列のインデックスが正しく取得できているか確認
-    if (!indices.KIBAN || !indices.KIBAN_URL || !indices.MODEL || !indices.SERIES_URL) {
-       Logger.log("診断終了: 必須の列（機番、機番(リンク)、機種、STD資料(リンク)）が見つかりません。ヘッダー名が正しいか確認してください。");
-       ui.alert("【診断結果】必須の列が見つかりません。ヘッダー名を確認してください。");
-       return;
-    }
-
-    // 処理負荷を考慮し、チェックする行数を最大20行に制限
-    const numRowsToCheck = Math.min(20, lastRow - startRow + 1);
-    const range = sheet.getRange(startRow, 1, numRowsToCheck, sheet.getLastColumn());
-    const values = range.getDisplayValues(); // セルに表示されている値を取得
-    const formulas = range.getFormulas();     // セルに設定されている数式を取得
-
-    Logger.log(`先頭 ${numRowsToCheck} 行のデータ内容をチェックします...`);
-
-    let linkCellIsNotEmpty = false;
-    values.forEach((row, i) => {
-      const currentRowNum = startRow + i;
-      const kibanValue = row[indices.KIBAN - 1];
-      const modelValue = row[indices.MODEL - 1];
-      const kibanLinkCellDisplayValue = row[indices.KIBAN_URL - 1];
-      const stdLinkCellDisplayValue = row[indices.SERIES_URL - 1];
-      const kibanLinkCellFormula = formulas[i][indices.KIBAN_URL - 1];
-      const stdLinkCellFormula = formulas[i][indices.SERIES_URL - 1];
-
-      // ログに各セルの詳細情報を記録
-      Logger.log(`--- ${currentRowNum}行目のチェック ---`);
-      Logger.log(`  機番: 「${kibanValue}」`);
-      Logger.log(`  機種: 「${modelValue}」`);
-      Logger.log(`  機番(リンク)セルの表示値: 「${kibanLinkCellDisplayValue}」 (文字数: ${kibanLinkCellDisplayValue.length})`);
-      Logger.log(`  機番(リンク)セルの数式: 「${kibanLinkCellFormula}」`);
-      Logger.log(`  STD資料(リンク)セルの表示値: 「${stdLinkCellDisplayValue}」 (文字数: ${stdLinkCellDisplayValue.length})`);
-      Logger.log(`  STD資料(リンク)セルの数式: 「${stdLinkCellFormula}」`);
-      
-      // リンク先セルが空でない場合を検出
-      if (kibanLinkCellDisplayValue.length > 0 || stdLinkCellDisplayValue.length > 0) {
-        linkCellIsNotEmpty = true;
-      }
-    });
-
-    Logger.log("========= 診断を完了しました =========");
-
-    // ユーザーへのフィードバック
-    if (linkCellIsNotEmpty) {
-        ui.alert('【診断完了】\n\nリンク先のセルに何らかのデータ（スペース等）が含まれている可能性があります。\n\n詳細なログが出力されましたので、次の手順に進んでください。');
-    } else {
-        ui.alert('【診断完了】\n\nリンク先のセルは空のようです。\n\n詳細なログが出力されましたので、次の手順に進んでください。');
-    }
-
-  } catch (e) {
-    Logger.log(`診断中にエラーが発生しました: ${e.stack}`);
-    ui.alert(`診断中にエラーが発生しました: ${e.message}`);
   }
 }
