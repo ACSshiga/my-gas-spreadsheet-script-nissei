@@ -40,35 +40,46 @@ function importFromDriveFolder() {
 
     filesForProcessing.forEach(file => {
       const text = extractTextFromPdf(file);
-      const applications = text.split(/設計業務の外注委託申請書|--- PAGE \d+ ---/).filter(s => s.trim().length > 10);
-      if (applications.length === 0) return;
+      
+      // ★★★ デバッグログを追加 ★★★
+      Logger.log(`===== PDFファイル「${file.getName()}」から抽出したテキスト =====`);
+      Logger.log(text);
+      Logger.log(`========================================================`);
 
-      applications.forEach(appText => {
+      const applications = text.split(/設計業務の外注委託申請書|--- PAGE \d+ ---/).filter(s => s.trim().length > 20 && s.includes('管理No.'));
+      
+      if (applications.length === 0) {
+        Logger.log(`ファイル「${file.getName()}」から有効な申請書データが見つかりませんでした。`);
+        return;
+      }
+
+      applications.forEach((appText, i) => {
+        Logger.log(`--- 申請書 ${i + 1} の解析開始 ---`);
         const mgmtNo = getValue(appText, /管理No\.\s*(\S+)/);
-        if (!mgmtNo) return;
+        if (!mgmtNo) {
+          Logger.log('管理Noが見つからないためスキップします。');
+          return;
+        }
 
-        const kishu = getValue(appText, /機種:\s*([\s\S]*?)(?=\s*機番:)/);
-        const kiban = getValue(appText, /機番:\s*([\s\S]*?)(?=\s*納入先:)/);
+        const kishu = getValue(appText, /機種:\s*([\s\S]*?)(?=机番:|機番:|納入先:|・機械納期:)/);
+        const kiban = getValue(appText, /機番:\s*([\s\S]*?)(?=納入先:|・機械納期:|入庫予定日:)/);
         const nounyusaki = getValue(appText, /納入先:\s*([\s\S]*?)(?=\n|・機械納期:|入庫予定日:|・設計予定期間:)/);
         
         const kikanMatch = appText.match(/設計予定期間:?\s*(\d+\s*月\s*\d+\s*日)\s*~\s*(\d+\s*月\s*\d+\s*日)/);
         const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace(/\s/g, '').replace('月', '/').replace('日', '')}` : '';
 
-        const kousuMatch = appText.match(/盤配\s*:\s*(\d+)\s*H.*?線加工\s*(\d+)\s*H/s);
+        const kousuMatch = appText.match(/盤配\s*:\s*(\d+)\s*H[\s\S]*?線加工\s*(\d+)\s*H/);
 
         if (kousuMatch) {
           const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
         } else {
-          const yoteiKousu = getValue(appText, /見積設計工数:\s*(\d+)/) || getValue(appText, /(\d+)\s*Η/);
+          const yoteiKousu = getValue(appText, /見積設計工数:\s*(\d+)/) || getValue(appText, /(\d+)\s*Η/) || getValue(appText, /(\d+)\s*H/);
           const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
           
           let sagyouKubun = '盤配';
-          if (naiyou && naiyou.includes('線加工') && !naiyou.includes('盤配')) {
-            sagyouKubun = '線加工';
-          }
-          if (mgmtNo === 'E257001') {
+          if ((naiyou && naiyou.includes('線加工')) || mgmtNo === 'E257001') {
             sagyouKubun = '線加工';
           }
           
@@ -88,7 +99,7 @@ function importFromDriveFolder() {
       syncDefaultProgressToMain();
       colorizeAllSheets();
     } else if (totalImportedCount > 0) {
-      ui.alert(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。PDFのレイアウトが特殊な可能性があります。`);
+      ui.alert(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。Cloud Logsに詳細なデバッグ情報が出力されています。`);
     }
 
   } catch (e) {
@@ -130,13 +141,14 @@ function getValue(text, regex) {
  */
 function createRowData_(indices, data) {
   const row = [];
-  row[indices.MGMT_NO - 1] = data.mgmtNo || '';
-  row[indices.SAGYOU_KUBUN - 1] = data.sagyouKubun || '';
-  row[indices.KIBAN - 1] = data.kiban || '';
-  row[indices.MODEL - 1] = data.kishu || '';
-  row[indices.DESTINATION - 1] = data.nounyusaki || '';
-  row[indices.PLANNED_HOURS - 1] = data.yoteiKousu || '';
-  row[indices.DRAWING_DEADLINE - 1] = data.sakuzuKigen || '';
+  // 念のため、indicesに必要なキーが存在するかチェック
+  if (indices.MGMT_NO) row[indices.MGMT_NO - 1] = data.mgmtNo || '';
+  if (indices.SAGYOU_KUBUN) row[indices.SAGYOU_KUBUN - 1] = data.sagyouKubun || '';
+  if (indices.KIBAN) row[indices.KIBAN - 1] = data.kiban || '';
+  if (indices.MODEL) row[indices.MODEL - 1] = data.kishu || '';
+  if (indices.DESTINATION) row[indices.DESTINATION - 1] = data.nounyusaki || '';
+  if (indices.PLANNED_HOURS) row[indices.PLANNED_HOURS - 1] = data.yoteiKousu || '';
+  if (indices.DRAWING_DEADLINE) row[indices.DRAWING_DEADLINE - 1] = data.sakuzuKigen || '';
   
   return row;
 }
