@@ -10,6 +10,9 @@
 function onOpen(e) {
   const ui = SpreadsheetApp.getUi();
   const menu = ui.createMenu('カスタムメニュー');
+  // ▼▼▼ この1行を追加 ▼▼▼
+  menu.addItem('【診断】フォルダ作成のチェック', 'checkSheetSetupForFolderCreation');
+  // ▲▲▲ この1行を追加 ▲▲
   const activeSheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   
   if (activeSheet.getName() === CONFIG.SHEETS.MAIN || activeSheet.getName().startsWith('View_')) {
@@ -411,5 +414,60 @@ function colorizeSheet_(sheetObject) {
          normalRanges.forEach(range => range.clearDataValidations());
       }
     }
+  }
+}
+
+/**
+ * 【診断用】シートの状態をチェックして、問題を報告する関数です。
+ * 確認後、この関数は削除しても問題ありません。
+ */
+function checkSheetSetupForFolderCreation() {
+  const ui = SpreadsheetApp.getUi();
+  try {
+    const mainSheet = new MainSheet();
+    const sheet = mainSheet.getSheet();
+    const startRow = mainSheet.startRow;
+
+    // 1. データ行の存在チェック
+    if (sheet.getLastRow() < startRow) {
+      ui.alert('【診断結果】\n\nデータが1行も入力されていません。\n\n2行目以降に案件データを入力してください。');
+      return;
+    }
+
+    // 2. 必須列の存在と名前のチェック
+    const requiredHeaders = {
+      '機番': 'KIBAN',
+      '機番(リンク)': 'KIBAN_URL',
+      '機種': 'MODEL',
+      'STD資料(リンク)': 'SERIES_URL'
+    };
+    const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    for (const headerName in requiredHeaders) {
+      if (headerRow.indexOf(headerName) === -1) {
+        ui.alert(`【診断結果】\n\nヘッダー列「${headerName}」が見つかりません。\n\n1行目の列名が完全に一致しているか、括弧が半角「()」になっているか確認してください。`);
+        return;
+      }
+    }
+
+    // 3. データ内容のチェック
+    const indices = mainSheet.indices;
+    const values = sheet.getRange(startRow, 1, 5, sheet.getLastColumn()).getValues(); // 先頭5行をチェック
+    let hasKibanValue = false;
+    let hasModelValue = false;
+    values.forEach(row => {
+      if (row[indices.KIBAN - 1]) hasKibanValue = true;
+      if (row[indices.MODEL - 1]) hasModelValue = true;
+    });
+
+    if (!hasKibanValue && !hasModelValue) {
+      ui.alert('【診断結果】\n\n「機番」と「機種」の列にデータが入力されていません。\n\nフォルダを作成するには、これらの列に値が必要です。');
+      return;
+    }
+
+    ui.alert('【診断結果】\n\nシートの基本的な設定は問題ないようです。\n\nもしこれでもリンクが作成されない場合、Google Driveのフォルダ権限に問題がある可能性があります。');
+
+  } catch (e) {
+    Logger.log(e.stack);
+    ui.alert(`診断中にエラーが発生しました: ${e.message}`);
   }
 }
