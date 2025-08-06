@@ -2,7 +2,6 @@
  * PdfProcessing.gs
  * アップロードされた申請書ファイルを解析し、メインシートにデータをインポートする機能を担当します。
  */
-
 function importFromDriveFolder() {
   const ui = SpreadsheetApp.getUi();
   try {
@@ -36,9 +35,7 @@ function importFromDriveFolder() {
     filesForProcessing.forEach(file => {
       const text = extractTextFromPdf(file);
       
-      Logger.log(`===== PDFファイル「${file.getName()}」から抽出したテキスト =====`);
-      Logger.log(text);
-      Logger.log(`========================================================`);
+      Logger.log(`===== PDFファイル「${file.getName()}」から抽出したテキスト =====\n${text}\n========================================================`);
 
       const applications = text.split(/設計業務の外注委託申請書|--- PAGE \d+ ---/).filter(s => s.trim().length > 20 && /管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)/.test(s));
       
@@ -49,40 +46,43 @@ function importFromDriveFolder() {
 
       applications.forEach((appText, i) => {
         Logger.log(`--- 申請書 ${i + 1} の解析開始 ---`);
-        const mgmtNo = getValue(appText, /管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)\s*(\S+)/, 4);
-        if (!mgmtNo) {
-          Logger.log('管理Noが見つからないためスキップします。');
-          return;
-        }
-
-        const kishu = getValue(appText, /機種\s*[:：]\s*([\s\S]*?)(?=\s*机番\s*[:：]|\s*機番\s*[:：]|\s*納入先\s*[:：]|\s*・機械納期|\n)/, 2);
-        const kiban = getValue(appText, /機番\s*[:：]\s*([\s\S]*?)(?=\s*納入先\s*[:：]|\s*・機械納期|\s*入庫予定日|\n)/, 2);
-        const nounyusaki = getValue(appText, /納入先\s*[:：]\s*([\s\S]*?)(?=\s*・機械納期|\s*入庫予定日|\s*見積設計工数|\s*留意事項|\s*・設計予定期間|\n)/, 2);
         
         // ★★★ここからが修正箇所★★★
-        // さらに柔軟な正規表現に修正し、診断ログを追加
-        const cleanedAppText = appText.replace(/\s/g, ''); // 全ての空白・改行を削除してマッチングしやすくする
-        Logger.log(`[診断] 日付検索用の整形済みテキスト: ${cleanedAppText}`);
+        // 全ての項目で、より堅牢な正規表現と診断ログを使用するように変更
+        const cleanValue = (val) => val ? val.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim() : '';
         
-        const kikanMatch = cleanedAppText.match(/設計予定期間[:：]?(\d{1,2}月\d{1,2}日)[~～-](\d{1,2}月\d{1,2}日)/);
-        let sakuzuKigen = '';
-        if (kikanMatch) {
-          sakuzuKigen = `${year}/${kikanMatch[2].replace('月', '/').replace('日', '')}`;
-          Logger.log(`[診断] 作図期限を「${sakuzuKigen}」として認識しました。`);
-        } else {
-          Logger.log('[診断] 作図期限が見つかりませんでした。正規表現のマッチに失敗しました。');
-        }
+        const mgmtNoMatch = appText.match(/管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)\s*(\S+)/);
+        const mgmtNo = mgmtNoMatch ? cleanValue(mgmtNoMatch[5]) : '';
+        Logger.log(mgmtNo ? `[OK] 管理No: 「${mgmtNo}」` : `[NG] 管理Noが見つかりません。`);
+        if (!mgmtNo) return;
+
+        const kishuMatch = appText.match(/機種\s*[:：]([\s\S]*?)(?=\s*(?:机番|機番|納入先|・機械納期))/);
+        const kishu = kishuMatch ? cleanValue(kishuMatch[1]) : '';
+        Logger.log(kishu ? `[OK] 機種: 「${kishu}」` : `[INFO] 機種は空欄です。`);
+
+        const kibanMatch = appText.match(/機番\s*[:：]([\s\S]*?)(?=\s*(?:納入先|・機械納期))/);
+        const kiban = kibanMatch ? cleanValue(kibanMatch[1]) : '';
+        Logger.log(kiban ? `[OK] 機番: 「${kiban}」` : `[INFO] 機番は空欄です。`);
+        
+        const nounyusakiMatch = appText.match(/納入先\s*[:：]([\s\S]*?)(?=\s*(?:・機械納期|入庫予定日))/);
+        const nounyusaki = nounyusakiMatch ? cleanValue(nounyusakiMatch[1]) : '';
+        Logger.log(nounyusaki ? `[OK] 納入先: 「${nounyusaki}」` : `[INFO] 納入先は空欄です。`);
+
+        const kikanMatch = appText.replace(/\s/g, '').match(/設計予定期間[:：]?(\d{1,2}月\d{1,2}日)[~～-](\d{1,2}月\d{1,2}日)/);
+        const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace('月', '/').replace('日', '')}` : '';
+        Logger.log(sakuzuKigen ? `[OK] 作図期限: 「${sakuzuKigen}」` : `[INFO] 作図期限は見つかりませんでした。`);
         // ★★★ここまでが修正箇所★★★
 
         const kousuMatch = appText.match(/盤配\s*[:：]\s*(\d+)\s*H[\s\S]*?線加工\s*(\d+)\s*H/);
         if (kousuMatch) {
           const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
-          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
-          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
+          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: cleanValue(kousuMatch[1]) }));
+          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: cleanValue(kousuMatch[2]) }));
         } else {
-          const yoteiKousu = getValue(appText, /見積設計工数\s*[:：]\s*(\d+)/) || getValue(appText, /(\d+)\s*Η/) || getValue(appText, /(\d+)\s*H/);
-          const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
+          const yoteiKousuMatch = appText.match(/見積設計工数\s*[:：]\s*(\d+)|(\d+)\s*Η|(\d+)\s*H/);
+          const yoteiKousu = yoteiKousuMatch ? cleanValue(yoteiKousuMatch[1] || yoteiKousuMatch[2] || yoteiKousuMatch[3]) : '';
           
+          const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
           let sagyouKubun = '盤配';
           if ((naiyou && naiyou.includes('線加工')) || mgmtNo === 'E257001') {
             sagyouKubun = '線加工';
@@ -95,6 +95,7 @@ function importFromDriveFolder() {
       file.moveTo(processedFolder);
       totalImportedCount++;
     });
+
     if (allNewRows.length > 0) {
       const sheet = mainSheet.getSheet();
       const lastRow = sheet.getLastRow();
@@ -112,9 +113,6 @@ function importFromDriveFolder() {
   }
 }
 
-/**
- * Drive上のPDFファイルからOCRでテキストを抽出します。
- */
 function extractTextFromPdf(file) {
   let tempDoc;
   try {
@@ -132,17 +130,11 @@ function extractTextFromPdf(file) {
   }
 }
 
-/**
- * テキストから正規表現で値を抽出するヘルパー関数
- */
 function getValue(text, regex, groupIndex = 1) {
     const match = text.match(regex);
     return match && match[groupIndex] ? match[groupIndex].replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim() : '';
 }
 
-/**
- * メインシートに追加する行データを作成するヘルパー関数
- */
 function createRowData_(indices, data) {
   const row = [];
   if (indices.MGMT_NO) row[indices.MGMT_NO - 1] = data.mgmtNo || '';
