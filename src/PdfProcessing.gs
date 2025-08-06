@@ -46,7 +46,7 @@ function importFromDriveFolder() {
       Logger.log(text);
       Logger.log(`========================================================`);
 
-      const applications = text.split(/設計業務の外注委託申請書|--- PAGE \d+ ---/).filter(s => s.trim().length > 20 && /管理N(o|ｏ|O|Ｏ)\.(|．)/.test(s));
+      const applications = text.split(/設計業務の外注委託申請書|--- PAGE \d+ ---/).filter(s => s.trim().length > 20 && /管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)/.test(s));
       
       if (applications.length === 0) {
         Logger.log(`ファイル「${file.getName()}」から有効な申請書データが見つかりませんでした。`);
@@ -55,27 +55,27 @@ function importFromDriveFolder() {
 
       applications.forEach((appText, i) => {
         Logger.log(`--- 申請書 ${i + 1} の解析開始 ---`);
-        const mgmtNo = getValue(appText, /管理N(o|ｏ|O|Ｏ)\.(|．)\s*(\S+)/, 3);
+        const mgmtNo = getValue(appText, /管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)\s*(\S+)/, 5);
         if (!mgmtNo) {
           Logger.log('管理Noが見つからないためスキップします。');
           return;
         }
 
-        const kishu = getValue(appText, /機種:\s*([\s\S]*?)(?=机番:|機番:|納入先:|・機械納期:)/);
-        const kiban = getValue(appText, /機番:\s*([\s\S]*?)(?=納入先:|・機械納期:|入庫予定日:)/);
-        const nounyusaki = getValue(appText, /納入先:\s*([\s\S]*?)(?=\n|・機械納期:|入庫予定日:|・設計予定期間:)/);
+        const kishu = getValue(appText, /機種\s*(:|：)\s*([\s\S]*?)(?=机番:|機番:|納入先:|・機械納期:)/, 2);
+        const kiban = getValue(appText, /機番\s*(:|：)\s*([\s\S]*?)(?=納入先:|・機械納期:|入庫予定日:)/, 2);
+        const nounyusaki = getValue(appText, /納入先\s*(:|：)\s*([\s\S]*?)(?=\n|・機械納期:|入庫予定日:|・設計予定期間:)/, 2);
         
         const kikanMatch = appText.match(/設計予定期間:?\s*(\d+\s*月\s*\d+\s*日)\s*~\s*(\d+\s*月\s*\d+\s*日)/);
         const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace(/\s/g, '').replace('月', '/').replace('日', '')}` : '';
 
-        const kousuMatch = appText.match(/盤配\s*:\s*(\d+)\s*H[\s\S]*?線加工\s*(\d+)\s*H/);
+        const kousuMatch = appText.match(/盤配\s*[:：]\s*(\d+)\s*H[\s\S]*?線加工\s*(\d+)\s*H/);
 
         if (kousuMatch) {
           const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
         } else {
-          const yoteiKousu = getValue(appText, /見積設計工数:\s*(\d+)/) || getValue(appText, /(\d+)\s*Η/) || getValue(appText, /(\d+)\s*H/);
+          const yoteiKousu = getValue(appText, /見積設計工数\s*[:：]\s*(\d+)/) || getValue(appText, /(\d+)\s*Η/) || getValue(appText, /(\d+)\s*H/);
           const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
           
           let sagyouKubun = '盤配';
