@@ -107,6 +107,7 @@ class InputSheet extends SheetService {
     const lastRow = this.getLastRow();
     if (lastRow < this.startRow) return new Map();
     
+    // 進捗列までのデータだけを効率的に取得
     const lastColToRead = Math.max(this.indices.MGMT_NO, this.indices.SAGYOU_KUBUN, this.indices.PROGRESS);
     const values = this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, lastColToRead).getValues();
     
@@ -125,7 +126,7 @@ class InputSheet extends SheetService {
 }
 
 // =================================================================================
-// === カレンダーと休日のメンテナンス関数 (ここからが追加部分) ===
+// === カレンダーと休日のメンテナンス関数 ===
 // =================================================================================
 
 /**
