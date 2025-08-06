@@ -4,7 +4,6 @@
  */
 
 /**
- * ★★★ 新規追加 ★★★
  * 指定されたGoogle DriveフォルダからPDFファイルを一括でインポートします。
  */
 function importFromDriveFolder() {
@@ -27,7 +26,6 @@ function importFromDriveFolder() {
       if (applications.length === 0) continue;
 
       applications.forEach(appText => {
-        // (データ抽出ロジックは同じ)
         const mgmtNo = getValue(appText, /管理No\.\s*(\S+)/);
         const kishu = getValue(appText, /機種:\s*([^\s機]+)/);
         const kiban = getValue(appText, /機番:\s*(\S+)/);
@@ -48,7 +46,6 @@ function importFromDriveFolder() {
         }
       });
 
-      // 処理が終わったファイルを移動
       file.moveTo(processedFolder);
       totalImportedCount++;
     }
@@ -79,6 +76,7 @@ function extractTextFromPdf(file) {
   let tempDoc;
   try {
     const blob = file.getBlob();
+    // Drive API を使用 (V2)
     const resource = { title: `temp_ocr_${file.getName()}`, mimeType: MimeType.GOOGLE_DOCS };
     const tempDocFile = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'ja' });
     tempDoc = DocumentApp.openById(tempDocFile.id);
@@ -87,10 +85,33 @@ function extractTextFromPdf(file) {
     throw new Error(`ファイル「${file.getName()}」のテキスト抽出に失敗しました: ${e.message}`);
   } finally {
     if (tempDoc) {
+      // 一時ファイルを完全に削除
       Drive.Files.remove(tempDoc.getId());
     }
   }
 }
 
-// (getValue, createRowData_ のヘルパー関数は変更なし)
-// ...
+
+/**
+ * テキストから正規表現で値を抽出するヘルパー関数
+ */
+function getValue(text, regex) {
+  const match = text.match(regex);
+  return match ? match[1].trim() : '';
+}
+
+/**
+ * メインシートに追加する行データを作成するヘルパー関数
+ */
+function createRowData_(indices, data) {
+  const row = [];
+  row[indices.MGMT_NO - 1] = data.mgmtNo || '';
+  row[indices.SAGYOU_KUBUN - 1] = data.sagyouKubun || '';
+  row[indices.KIBAN - 1] = data.kiban || '';
+  row[indices.MODEL - 1] = data.kishu || '';
+  row[indices.DESTINATION - 1] = data.nounyusaki || '';
+  row[indices.PLANNED_HOURS - 1] = data.yoteiKousu || '';
+  row[indices.DRAWING_DEADLINE - 1] = data.sakuzuKigen || '';
+  
+  return row;
+}
