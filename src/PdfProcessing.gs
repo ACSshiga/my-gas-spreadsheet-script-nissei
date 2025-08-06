@@ -18,7 +18,6 @@ function importFromDriveFolder() {
     const sourceFolder = DriveApp.getFolderById(CONFIG.FOLDERS.IMPORT_SOURCE_FOLDER);
     const processedFolder = DriveApp.getFolderById(CONFIG.FOLDERS.PROCESSED_FOLDER);
     const filesIterator = sourceFolder.getFilesByType(MimeType.PDF);
-    
     const filesForProcessing = [];
     while (filesIterator.hasNext()) {
       filesForProcessing.push(filesIterator.next());
@@ -37,7 +36,6 @@ function importFromDriveFolder() {
     const mainSheet = new MainSheet();
     const indices = mainSheet.indices;
     const year = new Date().getFullYear();
-
     filesForProcessing.forEach(file => {
       const text = extractTextFromPdf(file);
       
@@ -55,7 +53,10 @@ function importFromDriveFolder() {
 
       applications.forEach((appText, i) => {
         Logger.log(`--- 申請書 ${i + 1} の解析開始 ---`);
-        const mgmtNo = getValue(appText, /管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)\s*(\S+)/, 5);
+        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        // 修正箇所：キャプチャグループのインデックスを 5 から 4 に修正
+        const mgmtNo = getValue(appText, /管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)\s*(\S+)/, 4);
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         if (!mgmtNo) {
           Logger.log('管理Noが見つからないためスキップします。');
           return;
@@ -69,7 +70,6 @@ function importFromDriveFolder() {
         const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace(/\s/g, '').replace('月', '/').replace('日', '')}` : '';
 
         const kousuMatch = appText.match(/盤配\s*[:：]\s*(\d+)\s*H[\s\S]*?線加工\s*(\d+)\s*H/);
-
         if (kousuMatch) {
           const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
