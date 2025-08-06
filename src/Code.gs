@@ -36,7 +36,7 @@ function onOpen(e) {
 
   applyStandardFormattingToMainSheet();
   setupAllDataValidations();
-  syncMainToAllInputSheets(); // 「未着手」処理を統合したこちらを呼び出す
+  syncMainToAllInputSheets();
   colorizeAllSheets();
 }
 
@@ -67,7 +67,7 @@ function onEdit(e) {
     const sheetName = sheet.getName();
     if (sheetName === CONFIG.SHEETS.MAIN) {
       ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
-      syncMainToAllInputSheets(); // 「未着手」処理を統合したこちらを呼び出す
+      syncMainToAllInputSheets();
       colorizeAllSheets();
       ss.toast('同期処理が完了しました。', '完了', 3);
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
@@ -341,10 +341,17 @@ function colorizeSheet_(sheetObject) {
   const dataRows = lastRow - startRow + 1;
   const lastCol = sheet.getLastColumn();
   const fullRange = sheet.getRange(startRow, 1, dataRows, lastCol);
-  const displayValues = fullRange.getDisplayValues();
+
+  // ▼▼▼ 修正箇所 START: リンクが消えないように修正 ▼▼▼
+  const values = fullRange.getValues();
   const formulas = fullRange.getFormulas();
+  // 数式を優先して、書き込むための2次元配列を再生成する
+  const outputValues = values.map((row, i) => {
+    return row.map((cell, j) => formulas[i][j] || cell);
+  });
+  // ▲▲▲ 修正箇所 END ▲▲▲
+
   const backgroundColors = fullRange.getBackgrounds();
-  const outputValues = JSON.parse(JSON.stringify(displayValues));
 
   const mgmtNoCol = indices.MGMT_NO;
   const progressCol = indices.PROGRESS;
@@ -357,7 +364,8 @@ function colorizeSheet_(sheetObject) {
   const uniqueKeys = new Set();
   const restrictedRanges = [];
   const normalRanges = [];
-  displayValues.forEach((row, i) => {
+  
+  values.forEach((row, i) => { // 注意: 比較には `values` を使う
     let isDuplicate = false;
     if (kibanCol && sagyouKubunCol) {
       const kiban = safeTrim(row[kibanCol - 1]);
@@ -397,11 +405,9 @@ function colorizeSheet_(sheetObject) {
           : getColor(PROGRESS_COLORS, progressValue, baseColor);
         
         backgroundColors[i][progressCol - 1] = progressColor;
-        // ▼▼▼ 修正: 工数シートでも管理Noに色が付くように修正 ▼▼▼
         if (mgmtNoCol && (sheetObject instanceof MainSheet || sheetObject instanceof InputSheet || sheet.getName().startsWith('View_'))) {
           backgroundColors[i][mgmtNoCol - 1] = progressColor;
         }
-        // ▲▲▲ 修正完了 ▲▲▲
       }
 
       if (sagyouKubunCol) {
@@ -431,15 +437,8 @@ function colorizeSheet_(sheetObject) {
     }
   });
 
-  formulas.forEach((row, i) => {
-    row.forEach((formula, j) => {
-      if (formula) {
-        outputValues[i][j] = formula;
-      }
-    });
-  });
-  fullRange.setBackgrounds(backgroundColors);
-  fullRange.setValues(outputValues);
+  fullRange.setValues(outputValues); // 値と数式を書き戻す
+  fullRange.setBackgrounds(backgroundColors); // 色を書き戻す
 
   if (sheetObject instanceof MainSheet) {
     if (restrictedRanges.length > 0) {
