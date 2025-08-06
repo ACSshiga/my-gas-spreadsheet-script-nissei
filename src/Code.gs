@@ -7,7 +7,11 @@
 // === イベントハンドラ ===
 // =================================================================================
 
+/**
+ * onOpen: ファイルを開いた時に実行される処理
+ */
 function onOpen(e) {
+  // カスタムメニューの作成
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('カスタムメニュー')
     .addItem('自分の担当案件のみ表示', 'createPersonalView')
@@ -27,10 +31,18 @@ function onOpen(e) {
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
 
+  // ★★★ここからが改善箇所★★★
+  // onOpenで実行する処理の順番を最適化
   syncMainToAllInputSheets();
+  applyStandardFormattingToAllSheets();
+  applyStandardFormattingToMainSheet();
   colorizeAllSheets();
+  // ★★★ここまでが改善箇所★★★
 }
 
+/**
+ * onEdit: 編集イベントを処理する司令塔 (待機処理を追加)
+ */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
   
@@ -77,10 +89,16 @@ function onEdit(e) {
 // === メンテナンス用関数 ===
 // =================================================================================
 
+/**
+ * 定期実行（毎時）で呼び出される関数
+ */
 function periodicMaintenance() {
   setupAllDataValidations();
 }
 
+/**
+ * 手動実行用の統合関数
+ */
 function runAllManualMaintenance() {
   SpreadsheetApp.getActiveSpreadsheet().toast('各種設定と書式を適用中...', '処理中', 3);
   applyStandardFormattingToAllSheets();
@@ -95,32 +113,61 @@ function runAllManualMaintenance() {
 // =================================================================================
 
 /**
- * 全てのシートに標準の書式（フォント、フォントサイズ）を適用します。
+ * 全てのシートにおしゃれな書式を適用します。
  */
 function applyStandardFormattingToAllSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const allSheets = ss.getSheets();
   
-  ss.toast('フォントとサイズを整形中...', '処理中');
+  ss.toast('全シートの書式をおしゃれに更新中...', '処理中');
   
   allSheets.forEach(sheet => {
-    // 工数シートは書式設定の対象外にする
-    if (sheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-      return;
-    }
     try {
       const dataRange = sheet.getDataRange();
       if (dataRange.isBlank()) return;
+      const lastCol = sheet.getLastColumn();
+      const lastRow = sheet.getLastRow();
 
-      // フォントとサイズのみを設定
-      dataRange.setFontFamily("Arial").setFontSize(12);
-      
+      dataRange
+        .setFontFamily("Arial")
+        .setFontSize(12)
+        .setVerticalAlignment("middle")
+        .setBorder(true, true, true, true, true, true, "#cccccc", SpreadsheetApp.BorderStyle.SOLID);
+
+      const headerRange = sheet.getRange(1, 1, 1, lastCol);
+      headerRange.setHorizontalAlignment("center");
+
+      const sheetName = sheet.getName();
+      let indices;
+      if (sheetName === CONFIG.SHEETS.MAIN) {
+        indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
+        const numberCols = [indices.PLANNED_HOURS, indices.ACTUAL_HOURS];
+        numberCols.forEach(colIndex => {
+          if (colIndex && lastRow > 1) {
+            sheet.getRange(2, colIndex, lastRow - 1).setHorizontalAlignment("right");
+          }
+        });
+      } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+        indices = getColumnIndices(sheet, INPUT_SHEET_HEADERS);
+        const numberCols = [indices.PLANNED_HOURS, indices.ACTUAL_HOURS_SUM];
+        numberCols.forEach(colIndex => {
+          if (colIndex && lastRow > 2) {
+             sheet.getRange(3, colIndex, lastRow - 2).setHorizontalAlignment("right");
+          }
+        });
+        if (indices.SEPARATOR) {
+           const dateColStart = indices.SEPARATOR + 1;
+           if (lastCol >= dateColStart && lastRow > 2) {
+             sheet.getRange(3, dateColStart, lastRow - 2, lastCol - dateColStart + 1).setHorizontalAlignment("right");
+           }
+        }
+      }
     } catch (e) {
       Logger.log(`シート「${sheet.getName()}」の書式設定中にエラー: ${e.message}`);
     }
   });
   
-  ss.toast('フォントとサイズの更新が完了しました。', '完了', 3);
+  ss.toast('全シートの書式を更新しました。', '完了', 3);
 }
 
 
