@@ -109,12 +109,21 @@ function syncInputToMain(inputSheetName, editedRange) {
   valuesToUpdate[mainIndices.PROGRESS_EDITOR] = tantoushaName;
   valuesToUpdate[mainSheet.indices.UPDATE_TS] = new Date();
   
+  // ▼▼▼ 修正箇所 START ▼▼▼
+  // リンク等の数式を保持したまま行を更新するように修正
   const updateRange = mainSheet.sheet.getRange(targetRowInfo.rowNum, 1, 1, mainSheet.getLastColumn());
-  const newRowData = updateRange.getValues()[0];
+  const currentValues = updateRange.getValues()[0];
+  const currentFormulas = updateRange.getFormulas()[0];
+
+  // 数式があるセルは数式を、そうでなければ値を優先して新しい行データを作成
+  const newRowData = currentValues.map((cellValue, i) => currentFormulas[i] || cellValue);
+
+  // 更新が必要な部分だけを上書き
   for (const [colIndex, value] of Object.entries(valuesToUpdate)) {
     newRowData[colIndex - 1] = value;
   }
   updateRange.setValues([newRowData]);
+  // ▲▲▲ 修正箇所 END ▲▲▲
 }
 
 /**
