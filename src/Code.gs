@@ -24,6 +24,7 @@ function onOpen(e) {
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addSeparator()
     .addItem('各種設定と書式を再適用', 'runAllManualMaintenance')
+    .addItem('シート全体の書式を整える', 'applyStandardFormattingToAllSheets') // ★手動実行メニューを追加
     .addItem('次の月のカレンダーを追加', 'addNextMonthColumnsToAllInputSheets')
     .addSeparator()
     .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
@@ -100,12 +101,47 @@ function runAllManualMaintenance() {
   setupAllDataValidations();
   colorizeAllSheets();
   applyStandardFormattingToMainSheet();
+  applyStandardFormattingToAllSheets(); // ★書式設定をここでも呼び出す
   SpreadsheetApp.getActiveSpreadsheet().toast('適用が完了しました。', '完了', 3);
 }
 
 // =================================================================================
 // === 書式設定 ===
 // =================================================================================
+
+/**
+ * ★★★ここからが新しい関数★★★
+ * 全てのシートに標準の書式（フォント、フォントサイズ、列幅、行高）を適用します。
+ */
+function applyStandardFormattingToAllSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const allSheets = ss.getSheets();
+  
+  ss.toast('全シートの書式を整形中...', '処理中');
+  
+  allSheets.forEach(sheet => {
+    try {
+      const lastRow = sheet.getLastRow();
+      const lastCol = sheet.getLastColumn();
+
+      if (lastRow > 0 && lastCol > 0) {
+        const dataRange = sheet.getRange(1, 1, lastRow, lastCol);
+        
+        // フォントとサイズを設定
+        dataRange.setFontFamily("Arial").setFontSize(12);
+        
+        // 列と行の幅を自動調整
+        sheet.autoResizeColumns(1, lastCol);
+        sheet.autoResizeRows(1, lastRow);
+      }
+    } catch (e) {
+      Logger.log(`シート「${sheet.getName()}」の書式設定中にエラー: ${e.message}`);
+    }
+  });
+  
+  ss.toast('全シートの書式を更新しました。', '完了', 3);
+}
+
 /**
  * メインシートにヘッダーの色付けとウィンドウ枠の固定を適用します。
  */
