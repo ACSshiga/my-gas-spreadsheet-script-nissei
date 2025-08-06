@@ -33,7 +33,6 @@ function onOpen(e) {
     .addSeparator()
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
-
   applyStandardFormattingToMainSheet();
   setupAllDataValidations();
   syncMainToAllInputSheets();
@@ -51,27 +50,38 @@ function showImportDialog() {
 }
 
 
+/**
+ * スプレッドシートの編集イベントを処理する司令塔
+ */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) {
-    console.log('先行する処理が実行中のため、今回の編集イベントはスキップされました。');
+    Logger.log('先行する処理が実行中のため、今回の編集イベントはスキップされました。');
     return;
   }
   
   const ss = e.source;
   try {
-    setupAllDataValidations(); 
-
     const sheet = e.range.getSheet();
     const sheetName = sheet.getName();
+
     if (sheetName === CONFIG.SHEETS.MAIN) {
-      ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
-      syncMainToAllInputSheets();
-      colorizeAllSheets();
-      ss.toast('同期処理が完了しました。', '完了', 3);
+      const mainSheet = new MainSheet();
+      const editedCol = e.range.getColumn();
+      // ★★★ここからが改善ロジック★★★
+      // 担当者列が編集された場合も同期をトリガーする
+      if (editedCol === mainSheet.indices.TANTOUSHA) {
+        ss.toast('担当者の変更を検出しました。関連シートを同期します...', '同期中', 5);
+        syncMainToAllInputSheets();
+        colorizeAllSheets();
+        ss.toast('同期処理が完了しました。', '完了', 3);
+      } else {
+        // それ以外のメインシートの編集は、従来通り色付けのみ行う
+         colorizeAllSheets();
+      }
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-      ss.toast(`${sheetName}の変更を検出しました。集計処理を開始します...`, '集計中', 5);
+      ss.toast(`${sheetName}の変更を検出しました。メインシートへ集計します...`, '集計中', 5);
       syncInputToMain(sheetName, e.range);
       colorizeAllSheets();
       ss.toast('集計処理が完了しました。', '完了', 3);
@@ -102,11 +112,13 @@ function applyStandardFormattingToMainSheet() {
     if (sheet) {
       const headerRange = sheet.getRange(1, 1, 1, sheet.getMaxColumns());
       headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND);
-      headerRange.setFontColor('#ffffff'); // 文字色を白に
+      headerRange.setFontColor('#ffffff');
+      // 文字色を白に
       headerRange.setFontWeight('bold');
       
       sheet.setFrozenRows(1);
-      sheet.setFrozenColumns(4); // D列までを固定
+      sheet.setFrozenColumns(4);
+      // D列までを固定
     }
   } catch(e) {
     Logger.log(`メインシートの標準フォーマット適用中にエラー: ${e.message}`);
@@ -175,7 +187,6 @@ function createPersonalView() {
   const viewSheetName = `View_${tantoushaName}`;
   const viewSheet = ss.insertSheet(viewSheetName, 0);
   viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
-
   try {
     const headerRange = viewSheet.getRange(1, 1, 1, viewSheet.getMaxColumns());
     headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND);
@@ -360,11 +371,9 @@ function colorizeSheet_(sheetObject) {
   const kibanCol = indices.KIBAN;
   const sagyouKubunCol = indices.SAGYOU_KUBUN;
   const DUPLICATE_COLOR = '#cccccc';
-
   const uniqueKeys = new Set();
   const restrictedRanges = [];
   const normalRanges = [];
-  
   values.forEach((row, i) => { // 注意: 比較には `values` を使う
     let isDuplicate = false;
     if (kibanCol && sagyouKubunCol) {
@@ -375,6 +384,7 @@ function colorizeSheet_(sheetObject) {
         const uniqueKey = `${kiban}_${sagyouKubun}`;
         if (uniqueKeys.has(uniqueKey)) {
           isDuplicate = true;
+      
         } else {
           uniqueKeys.add(uniqueKey);
         }
@@ -387,7 +397,8 @@ function colorizeSheet_(sheetObject) {
       }
       if (progressCol) outputValues[i][progressCol - 1] = "機番重複";
       if (tantoushaCol) outputValues[i][tantoushaCol - 1] = "";
-      if (sheetObject instanceof MainSheet && tantoushaCol) {
+   
+       if (sheetObject instanceof MainSheet && tantoushaCol) {
         restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
       }
     } else {
@@ -401,7 +412,8 @@ function colorizeSheet_(sheetObject) {
       if (progressCol) {
         const progressValue = safeTrim(row[progressCol - 1]);
         const progressColor = (progressValue === "")
-          ? baseColor
+          ?
+          baseColor
           : getColor(PROGRESS_COLORS, progressValue, baseColor);
         
         backgroundColors[i][progressCol - 1] = progressColor;
@@ -426,9 +438,9 @@ function colorizeSheet_(sheetObject) {
         }
         if (toiawaseCol) {
           const color = getColor(TOIAWASE_COLORS, safeTrim(row[toiawaseCol - 1]), baseColor);
-           if (color !== baseColor) {
+          if (color !== baseColor) {
             backgroundColors[i][toiawaseCol - 1] = color;
-           }
+          }
         }
       }
       if (sheetObject instanceof MainSheet && tantoushaCol) {
@@ -438,7 +450,8 @@ function colorizeSheet_(sheetObject) {
   });
 
   fullRange.setValues(outputValues); // 値と数式を書き戻す
-  fullRange.setBackgrounds(backgroundColors); // 色を書き戻す
+  fullRange.setBackgrounds(backgroundColors);
+  // 色を書き戻す
 
   if (sheetObject instanceof MainSheet) {
     if (restrictedRanges.length > 0) {
@@ -461,112 +474,5 @@ function colorizeSheet_(sheetObject) {
          normalRanges.forEach(range => range.clearDataValidations());
       }
     }
-  }
-}
-
-/**
- * データ同期が機能するための前提条件が満たされているかを診断する関数です。
- * 1. メインシートと各工数シートのヘッダー名が正しいか
- * 2. 各工数シートのデータ（管理Noと作業区分の組み合わせ）がメインシートに存在するか
- * 上記2点をチェックし、結果をログに出力します。
- */
-function checkSyncReadiness() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const ui = SpreadsheetApp.getUi();
-  Logger.log("データ同期の準備状況のチェックを開始します...");
-
-  try {
-    // --- 1. メインシートの準備 ---
-    const mainSheet = new MainSheet();
-    const mainIndices = mainSheet.indices;
-    const mainSheetName = mainSheet.getName();
-
-    // --- ヘッダーチェック (メインシート) ---
-    Logger.log(`▼▼▼ ${mainSheetName} のヘッダーチェック ▼▼▼`);
-    checkHeaders(mainSheet.getSheet(), MAIN_SHEET_HEADERS);
-
-    // --- 2. メインシートの同期キーを収集 ---
-    const mainDataMap = mainSheet.getDataMap();
-    const mainKeys = new Set(mainDataMap.keys());
-    Logger.log(`メインシートから ${mainKeys.size} 件のユニークキーを読み込みました。`);
-    if (mainKeys.size === 0) {
-      Logger.log("警告: メインシートにデータが存在しないか、キー（管理No, 作業区分）が読み取れませんでした。");
-    }
-
-    // --- 3. 全ての工数シートをチェック ---
-    const allSheets = ss.getSheets();
-    allSheets.forEach(sheet => {
-      const sheetName = sheet.getName();
-      if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-        Logger.log(`\n--- シート「${sheetName}」のチェックを開始 ---`);
-        const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
-        const inputSheet = new InputSheet(tantoushaName);
-        const inputIndices = inputSheet.indices;
-
-        // ヘッダーチェック (工数シート)
-        Logger.log(`▼▼▼ ${sheetName} のヘッダーチェック ▼▼▼`);
-        checkHeaders(inputSheet.getSheet(), INPUT_SHEET_HEADERS);
-
-        const startRow = inputSheet.startRow;
-        const lastRow = inputSheet.getLastRow();
-
-        if (lastRow < startRow) {
-          Logger.log("データが存在しないため、キーのチェックはスキップします。");
-          return;
-        }
-
-        // データキーの整合性チェック
-        Logger.log(`▼▼▼ ${sheetName} のデータキー整合性チェック ▼▼▼`);
-        const values = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
-        let mismatchCount = 0;
-        values.forEach((row, i) => {
-          const mgmtNo = row[inputIndices.MGMT_NO - 1];
-          const sagyouKubun = row[inputIndices.SAGYOU_KUBUN - 1];
-
-          if (mgmtNo && sagyouKubun) { // キーが存在する場合のみチェック
-            const uniqueKey = `${mgmtNo}_${sagyouKubun}`;
-            if (!mainKeys.has(uniqueKey)) {
-              mismatchCount++;
-              Logger.log(`  [不整合!] ${i + startRow}行目: 管理No「${mgmtNo}」と作業区分「${sagyouKubun}」の組み合わせがメインシートに存在しません。`);
-            }
-          }
-        });
-        if (mismatchCount === 0) {
-          Logger.log("  [OK] 全てのデータキーがメインシートと整合しています。");
-        } else {
-          Logger.log(`  警告: ${mismatchCount}件のデータで不整合が見つかりました。`);
-        }
-      }
-    });
-
-    Logger.log("\nチェックが完了しました。上記ログを確認してください。");
-    ui.alert('チェックが完了しました。詳細は Apps Script エディタの「実行数」からログを確認してください。');
-
-  } catch (e) {
-    Logger.log(`診断中に予期せぬエラーが発生しました: ${e.message}\n${e.stack}`);
-    ui.alert(`診断中にエラーが発生しました: ${e.message}`);
-  }
-}
-
-/**
- * ヘルパー関数：シートのヘッダーが定義と一致するかチェック
- */
-function checkHeaders(sheet, headerDef) {
-  try {
-    const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    let hasError = false;
-    for (const [key, expectedHeader] of Object.entries(headerDef)) {
-      if (expectedHeader === "") continue; // セパレータは無視
-      const actualIndex = headerRow.indexOf(expectedHeader);
-      if (actualIndex === -1) {
-        hasError = true;
-        Logger.log(`  [NG] 必須ヘッダー「${expectedHeader}」が見つかりません。`);
-      }
-    }
-    if (!hasError) {
-      Logger.log("  [OK] 必須ヘッダーは全て存在します。");
-    }
-  } catch (e) {
-    Logger.log(`ヘッダーチェック中にエラーが発生しました: ${e.message}`);
   }
 }

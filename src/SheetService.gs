@@ -21,11 +21,9 @@ class SheetService {
   }
 
   getSheet() { return this.sheet; }
-  getLastRow() { return this.sheet.getLastRow();
-  }
+  getLastRow() { return this.sheet.getLastRow(); }
   getLastColumn() { return this.sheet.getLastColumn(); }
-  getName() { return this.sheetName;
-  }
+  getName() { return this.sheetName; }
 }
 
 
@@ -175,5 +173,26 @@ class InputSheet extends SheetService {
       sumFormulas.push([`=IFERROR(SUM(${dateStartColLetter}${rowNum}:${rowNum}))`]);
     }
     this.sheet.getRange(this.startRow, this.indices.ACTUAL_HOURS_SUM, data.length, 1).setFormulas(sumFormulas);
+  }
+  
+  getDataMapForProgress() {
+    const lastRow = this.getLastRow();
+    if (lastRow < this.startRow) return new Map();
+    
+    // 進捗列までのデータだけを効率的に取得
+    const lastColToRead = Math.max(this.indices.MGMT_NO, this.indices.SAGYOU_KUBUN, this.indices.PROGRESS);
+    const values = this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, lastColToRead).getValues();
+    
+    const dataMap = new Map();
+    values.forEach(row => {
+      const mgmtNo = row[this.indices.MGMT_NO - 1];
+      const sagyouKubun = row[this.indices.SAGYOU_KUBUN - 1];
+      const progress = row[this.indices.PROGRESS - 1];
+      if (mgmtNo && sagyouKubun) {
+        const uniqueKey = `${mgmtNo}_${sagyouKubun}`;
+        dataMap.set(uniqueKey, progress);
+      }
+    });
+    return dataMap;
   }
 }
