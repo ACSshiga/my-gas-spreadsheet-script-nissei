@@ -4,42 +4,60 @@
  */
 
 /**
+ * ★★★ デバッグ機能を追加 ★★★
  * 指定されたGoogle DriveフォルダからPDFファイルを一括でインポートします。
  */
 function importFromDriveFolder() {
   try {
+    // フォルダIDが正しく設定されているかを確認
+    if (CONFIG.FOLDERS.IMPORT_SOURCE_FOLDER === "ここに「申請書インポート用」のIDを貼り付け" || 
+        CONFIG.FOLDERS.PROCESSED_FOLDER === "ここに「処理済み申請書」のIDを貼り付け") {
+      SpreadsheetApp.getUi().alert('エラー: Config.gsファイルにインポート用のフォルダIDが正しく設定されていません。');
+      return;
+    }
+
     const sourceFolder = DriveApp.getFolderById(CONFIG.FOLDERS.IMPORT_SOURCE_FOLDER);
     const processedFolder = DriveApp.getFolderById(CONFIG.FOLDERS.PROCESSED_FOLDER);
-    const files = sourceFolder.getFilesByType(MimeType.PDF);
+    const filesIterator = sourceFolder.getFilesByType(MimeType.PDF);
     
+    // 見つかったファイルを一旦配列に格納して数を数える
+    const filesForProcessing = [];
+    while (filesIterator.hasNext()) {
+      filesForProcessing.push(filesIterator.next());
+    }
+    const fileCount = filesForProcessing.length;
+
+    // ★★★ ユーザーに直接フィードバックするためのアラートを追加 ★★★
+    SpreadsheetApp.getUi().alert(`インポート用フォルダ内で ${fileCount} 個のPDFファイルが見つかりました。処理を開始します。`);
+
+    // ファイルが見つからなかった場合は、ここで処理を終了
+    if (fileCount === 0) {
+      return;
+    }
+
     let totalImportedCount = 0;
     const allNewRows = [];
     const mainSheet = new MainSheet();
     const indices = mainSheet.indices;
     const year = new Date().getFullYear();
 
-    while (files.hasNext()) {
-      const file = files.next();
+    // ファイルの処理
+    filesForProcessing.forEach(file => {
       const text = extractTextFromPdf(file);
       
       const applications = text.split('設計業務の外注委託申請書').filter(Boolean);
-      if (applications.length === 0) continue;
+      if (applications.length === 0) return; // continueの代わりにreturn
 
       applications.forEach(appText => {
         const mgmtNo = getValue(appText, /管理No\.\s*(\S+)/);
-        if (!mgmtNo) return; // 管理Noがなければスキップ
+        if (!mgmtNo) return;
 
-        // ★★★ ここから修正 ★★★
         const kishu = getValue(appText, /機種:\s*(.*?)(?=\s*機番:|\n)/);
         const kiban = getValue(appText, /機番:\s*(.*?)(?=\s*納入先:|\n)/);
         const nounyusaki = getValue(appText, /納入先:\s*(.*?)\n/);
-        
         const kikanMatch = appText.match(/設計予定期間:\s*(\d+\s*月\s*\d+\s*日)\s*~\s*(\d+\s*月\s*\d+\s*日)/);
         const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace(/\s/g, '').replace('月', '/').replace('日', '')}` : '';
-
-        // より柔軟な正規表現で、盤配と線加工の両方を検出
         const kousuMatch = appText.match(/盤配\s*:\s*(\d+)\s*H.*?線加工\s*(\d+)\s*H/);
-        // ★★★ ここまで修正 ★★★
 
         if (kousuMatch) {
           const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
@@ -48,22 +66,20 @@ function importFromDriveFolder() {
         } else {
           const yoteiKousu = getValue(appText, /見積設計工数:\s*(\d+)/);
           const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
-          
           let sagyouKubun = '盤配';
           if (naiyou && naiyou.includes('線加工') && !naiyou.includes('盤配')) {
             sagyouKubun = '線加工';
           }
-          if (mgmtNo === 'E257001') { // E257001の特殊ケースに対応
+          if (mgmtNo === 'E257001') {
             sagyouKubun = '線加工';
           }
-          
           allNewRows.push(createRowData_(indices, { mgmtNo, sagyouKubun, kishu, kiban, nounyusaki, yoteiKousu, sakuzuKigen }));
         }
       });
 
       file.moveTo(processedFolder);
       totalImportedCount++;
-    }
+    });
 
     if (allNewRows.length > 0) {
       const sheet = mainSheet.getSheet();
@@ -72,8 +88,8 @@ function importFromDriveFolder() {
       SpreadsheetApp.getActiveSpreadsheet().toast(`${totalImportedCount}個のファイルから ${allNewRows.length}件のデータをインポートしました。`);
       syncDefaultProgressToMain();
       colorizeAllSheets();
-    } else {
-      SpreadsheetApp.getActiveSpreadsheet().toast('インポート対象の新しいファイルはありませんでした。');
+    } else if (totalImportedCount > 0) {
+      SpreadsheetApp.getActiveSpreadsheet().toast(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。`);
     }
 
   } catch (e) {
@@ -101,7 +117,6 @@ function extractTextFromPdf(file) {
     }
   }
 }
-
 
 /**
  * テキストから正規表現で値を抽出するヘルパー関数
