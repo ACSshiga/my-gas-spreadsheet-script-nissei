@@ -70,11 +70,6 @@ function toNumber(value) {
 // =================================================================================
 // === マスタデータ取得ユーティリティ ===
 // =================================================================================
-/**
- * マスタシートからデータを取得します。
- * @param {string} masterSheetName - マスタシート名
- * @param {number} numColumns - 取得する列数 (省略可能)
- */
 function getMasterData(masterSheetName, numColumns) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(masterSheetName);
@@ -89,12 +84,6 @@ function getMasterData(masterSheetName, numColumns) {
   return values.filter(row => row[0] !== "");
 }
 
-/**
- * 各マスタシートから色の対応表（Map）を作成します。
- * @param {string} sheetName - マスタシート名
- * @param {number} keyColIndex - キーとなる項目が含まれる列（0始まり）
- * @param {number} colorColIndex - カラーコードが含まれる列（0始まり）
- */
 function getColorMapFromMaster(sheetName, keyColIndex, colorColIndex) {
   const cache = CacheService.getScriptCache();
   const cacheKey = `color_map_${sheetName}`;
@@ -107,13 +96,36 @@ function getColorMapFromMaster(sheetName, keyColIndex, colorColIndex) {
 
   const masterData = getMasterData(sheetName);
   const colorMap = new Map(
-    masterData.map(row => [row[keyColIndex], row[colorColIndex]])
+    masterData
+      .filter(row => row[colorColIndex]) // カラーコードが空でない行のみ対象
+      .map(row => [row[keyColIndex], row[colorColIndex]])
   );
 
-  cache.put(cacheKey, JSON.stringify([...colorMap]), 3600); // 1時間キャッシュ
+  cache.put(cacheKey, JSON.stringify([...colorMap]), 3600);
   return colorMap;
 }
 
+// ★★★ ここから新規追加 ★★★
+/**
+ * 進捗マスタから「完了日トリガー」がTRUEのステータスリストを取得します。
+ */
+function getCompletionTriggerStatuses() {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'completion_trigger_statuses';
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  const masterData = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER, 3); // 3列目まで取得
+  const triggerStatuses = masterData
+    .filter(row => row[2] === true) // 完了日トリガーがTRUEの行をフィルタリング
+    .map(row => row[0]);             // 進捗名（1列目）だけを抽出
+
+  cache.put(cacheKey, JSON.stringify(triggerStatuses), 3600); // 1時間キャッシュ
+  return triggerStatuses;
+}
+// ★★★ ここまで新規追加 ★★★
 
 function getTantoushaNameByEmail(email) {
   if (!email) return null;
@@ -128,9 +140,6 @@ function logWithTimestamp(message) {
   console.log(`[${timestamp}] ${message}`);
 }
 
-// =================================================================================
-// === キャッシュクリア機能 ===
-// =================================================================================
 function clearScriptCache() {
   try {
     const cache = CacheService.getScriptCache();
