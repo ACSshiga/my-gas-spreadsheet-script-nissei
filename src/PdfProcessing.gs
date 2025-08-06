@@ -56,4 +56,102 @@ function importFromDriveFolder() {
         }
 
         const kishu = getValue(appText, /機種\s*[:：]\s*([\s\S]*?)(?=\s*机番\s*[:：]|\s*機番\s*[:：]|\s*納入先\s*[:：]|\s*・機械納期|\n)/, 2);
-        const kiban = getValue(appText, /機
+        const kiban = getValue(appText, /機番\s*[:：]\s*([\s\S]*?)(?=\s*納入先\s*[:：]|\s*・機械納期|\s*入庫予定日|\n)/, 2);
+        const nounyusaki = getValue(appText, /納入先\s*[:：]\s*([\s\S]*?)(?=\s*・機械納期|\s*入庫予定日|\s*見積設計工数|\s*留意事項|\s*・設計予定期間|\n)/, 2);
+        
+        // ★★★ここからが修正箇所★★★
+        // さらに柔軟な正規表現に修正し、診断ログを追加
+        const cleanedAppText = appText.replace(/\s/g, ''); // 全ての空白・改行を削除してマッチングしやすくする
+        Logger.log(`[診断] 日付検索用の整形済みテキスト: ${cleanedAppText}`);
+        
+        const kikanMatch = cleanedAppText.match(/設計予定期間[:：]?(\d{1,2}月\d{1,2}日)[~～-](\d{1,2}月\d{1,2}日)/);
+        let sakuzuKigen = '';
+        if (kikanMatch) {
+          sakuzuKigen = `${year}/${kikanMatch[2].replace('月', '/').replace('日', '')}`;
+          Logger.log(`[診断] 作図期限を「${sakuzuKigen}」として認識しました。`);
+        } else {
+          Logger.log('[診断] 作図期限が見つかりませんでした。正規表現のマッチに失敗しました。');
+        }
+        // ★★★ここまでが修正箇所★★★
+
+        const kousuMatch = appText.match(/盤配\s*[:：]\s*(\d+)\s*H[\s\S]*?線加工\s*(\d+)\s*H/);
+        if (kousuMatch) {
+          const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
+          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
+          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
+        } else {
+          const yoteiKousu = getValue(appText, /見積設計工数\s*[:：]\s*(\d+)/) || getValue(appText, /(\d+)\s*Η/) || getValue(appText, /(\d+)\s*H/);
+          const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
+          
+          let sagyouKubun = '盤配';
+          if ((naiyou && naiyou.includes('線加工')) || mgmtNo === 'E257001') {
+            sagyouKubun = '線加工';
+          }
+          
+          allNewRows.push(createRowData_(indices, { mgmtNo, sagyouKubun, kishu, kiban, nounyusaki, yoteiKousu, sakuzuKigen }));
+        }
+      });
+
+      file.moveTo(processedFolder);
+      totalImportedCount++;
+    });
+    if (allNewRows.length > 0) {
+      const sheet = mainSheet.getSheet();
+      const lastRow = sheet.getLastRow();
+      sheet.getRange(lastRow + 1, 1, allNewRows.length, allNewRows[0].length).setValues(allNewRows);
+      ui.alert(`${totalImportedCount}個のファイルから ${allNewRows.length}件のデータをインポートしました。`);
+      syncMainToAllInputSheets();
+      colorizeAllSheets();
+    } else if (totalImportedCount > 0) {
+      ui.alert(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。Cloud Logsに詳細なデバッグ情報が出力されています。`);
+    }
+
+  } catch (e) {
+    Logger.log(e.stack);
+    ui.alert(`エラーが発生しました: ${e.message}`);
+  }
+}
+
+/**
+ * Drive上のPDFファイルからOCRでテキストを抽出します。
+ */
+function extractTextFromPdf(file) {
+  let tempDoc;
+  try {
+    const blob = file.getBlob();
+    const resource = { title: `temp_ocr_${file.getName()}` };
+    const tempDocFile = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'ja' });
+    tempDoc = DocumentApp.openById(tempDocFile.id);
+    return tempDoc.getBody().getText();
+  } catch(e) {
+    throw new Error(`ファイル「${file.getName()}」のテキスト抽出に失敗しました: ${e.message}`);
+  } finally {
+    if (tempDoc) {
+      Drive.Files.remove(tempDoc.getId());
+    }
+  }
+}
+
+/**
+ * テキストから正規表現で値を抽出するヘルパー関数
+ */
+function getValue(text, regex, groupIndex = 1) {
+    const match = text.match(regex);
+    return match && match[groupIndex] ? match[groupIndex].replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim() : '';
+}
+
+/**
+ * メインシートに追加する行データを作成するヘルパー関数
+ */
+function createRowData_(indices, data) {
+  const row = [];
+  if (indices.MGMT_NO) row[indices.MGMT_NO - 1] = data.mgmtNo || '';
+  if (indices.SAGYOU_KUBUN) row[indices.SAGYOU_KUBUN - 1] = data.sagyouKubun || '';
+  if (indices.KIBAN) row[indices.KIBAN - 1] = data.kiban || '';
+  if (indices.MODEL) row[indices.MODEL - 1] = data.kishu || '';
+  if (indices.DESTINATION) row[indices.DESTINATION - 1] = data.nounyusaki || '';
+  if (indices.PLANNED_HOURS) row[indices.PLANNED_HOURS - 1] = data.yoteiKousu || '';
+  if (indices.DRAWING_DEADLINE) row[indices.DRAWING_DEADLINE - 1] = data.sakuzuKigen || '';
+  
+  return row;
+}
