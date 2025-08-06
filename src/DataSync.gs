@@ -8,6 +8,35 @@
 // =================================================================================
 function syncMainToAllInputSheets() {
   const mainSheet = new MainSheet();
+  const mainIndices = mainSheet.indices;
+  const lastRow = mainSheet.getLastRow();
+
+  // ▼▼▼ 修正箇所 START ▼▼▼
+  // 「未着手」の自動入力ロジックをこの関数に統合
+  if (lastRow >= mainSheet.startRow) {
+    const range = mainSheet.sheet.getRange(
+      mainSheet.startRow, 1,
+      lastRow - mainSheet.startRow + 1,
+      mainSheet.getLastColumn()
+    );
+    const mainData = range.getValues();
+    let hasUpdate = false;
+
+    mainData.forEach(row => {
+      const progress = row[mainIndices.PROGRESS - 1];
+      const tantousha = row[mainIndices.TANTOUSHA - 1];
+      
+      if (!progress && tantousha) {
+        row[mainIndices.PROGRESS - 1] = "未着手";
+        hasUpdate = true;
+      }
+    });
+    if(hasUpdate) {
+      range.setValues(mainData);
+    }
+  }
+  // ▲▲▲ 修正箇所 END ▲▲▲
+  
   const tantoushaList = mainSheet.getTantoushaList();
 
   if (mainSheet.getLastRow() < mainSheet.startRow) {
@@ -23,13 +52,12 @@ function syncMainToAllInputSheets() {
     return;
   }
 
+  // 最新の状態のメインシートデータを再取得
   const mainDataValues = mainSheet.sheet.getRange(
     mainSheet.startRow, 1, 
     mainSheet.getLastRow() - mainSheet.startRow + 1, 
     mainSheet.getLastColumn()
   ).getValues();
-  const mainIndices = mainSheet.indices;
-
 
   tantoushaList.forEach(tantousha => {
     try {
@@ -109,49 +137,21 @@ function syncInputToMain(inputSheetName, editedRange) {
   valuesToUpdate[mainIndices.PROGRESS_EDITOR] = tantoushaName;
   valuesToUpdate[mainSheet.indices.UPDATE_TS] = new Date();
   
-  // ▼▼▼ 修正箇所 START ▼▼▼
-  // リンク等の数式を保持したまま行を更新するように修正
   const updateRange = mainSheet.sheet.getRange(targetRowInfo.rowNum, 1, 1, mainSheet.getLastColumn());
   const currentValues = updateRange.getValues()[0];
   const currentFormulas = updateRange.getFormulas()[0];
-
-  // 数式があるセルは数式を、そうでなければ値を優先して新しい行データを作成
   const newRowData = currentValues.map((cellValue, i) => currentFormulas[i] || cellValue);
 
-  // 更新が必要な部分だけを上書き
   for (const [colIndex, value] of Object.entries(valuesToUpdate)) {
     newRowData[colIndex - 1] = value;
   }
   updateRange.setValues([newRowData]);
-  // ▲▲▲ 修正箇所 END ▲▲▲
 }
 
 /**
- * 工数シートの「未着手」をメインシートに反映する関数
+ * この関数は syncMainToAllInputSheets に統合されたため、現在は使用されません。
+ * 互換性のために残していますが、将来的には削除可能です。
  */
 function syncDefaultProgressToMain() {
-  const mainSheet = new MainSheet();
-  const lastRow = mainSheet.getLastRow();
-  if (lastRow < mainSheet.startRow) return;
-  
-  const range = mainSheet.sheet.getRange(
-    mainSheet.startRow, 1,
-    lastRow - mainSheet.startRow + 1,
-    mainSheet.getLastColumn()
-  );
-  const mainData = range.getValues();
-  let hasUpdate = false;
-
-  mainData.forEach(row => {
-    const progress = row[mainSheet.indices.PROGRESS - 1];
-    const tantousha = row[mainSheet.indices.TANTOUSHA - 1];
-    
-    if (!progress && tantousha) {
-      row[mainSheet.indices.PROGRESS - 1] = "未着手";
-      hasUpdate = true;
-    }
-  });
-  if(hasUpdate) {
-    range.setValues(mainData);
-  }
+  // 機能は syncMainToAllInputSheets に統合されました。
 }

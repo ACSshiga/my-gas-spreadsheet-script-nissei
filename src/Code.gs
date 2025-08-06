@@ -34,12 +34,9 @@ function onOpen(e) {
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
 
-  // ▼▼▼ この1行を追加 ▼▼▼
   applyStandardFormattingToMainSheet();
-  // ▲▲▲ この1行を追加 ▲▲▲
-
   setupAllDataValidations();
-  syncDefaultProgressToMain();
+  syncMainToAllInputSheets(); // 「未着手」処理を統合したこちらを呼び出す
   colorizeAllSheets();
 }
 
@@ -70,14 +67,12 @@ function onEdit(e) {
     const sheetName = sheet.getName();
     if (sheetName === CONFIG.SHEETS.MAIN) {
       ss.toast('メインシートの変更を検出しました。同期処理を開始します...', '同期中', 5);
-      syncMainToAllInputSheets();
-      syncDefaultProgressToMain();
+      syncMainToAllInputSheets(); // 「未着手」処理を統合したこちらを呼び出す
       colorizeAllSheets();
       ss.toast('同期処理が完了しました。', '完了', 3);
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
       ss.toast(`${sheetName}の変更を検出しました。集計処理を開始します...`, '集計中', 5);
       syncInputToMain(sheetName, e.range);
-      syncDefaultProgressToMain();
       colorizeAllSheets();
       ss.toast('集計処理が完了しました。', '完了', 3);
     }
@@ -96,7 +91,7 @@ function runColorizeAllSheets() {
 }
 
 // =================================================================================
-// === ▼▼▼ 新しい関数を追加 ▼▼▼ ===
+// === 書式設定 ===
 // =================================================================================
 /**
  * メインシートにヘッダーの色付けとウィンドウ枠の固定を適用します。
@@ -181,7 +176,6 @@ function createPersonalView() {
   const viewSheet = ss.insertSheet(viewSheetName, 0);
   viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
 
-  // ▼▼▼ ビューシートに書式設定を適用 ▼▼▼
   try {
     const headerRange = viewSheet.getRange(1, 1, 1, viewSheet.getMaxColumns());
     headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND);
@@ -192,7 +186,6 @@ function createPersonalView() {
   } catch(e) {
     Logger.log(`ビューシートの書式設定エラー: ${e.message}`);
   }
-  // ▲▲▲ 書式設定の適用完了 ▲▲▲
 
   if (personalData.length > 1) {
     viewSheet.getRange(1, 1, personalData.length, headers.length).createFilter();
@@ -390,23 +383,25 @@ function colorizeSheet_(sheetObject) {
         restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
       }
     } else {
-      // 最初に交互の背景色を設定
       const baseColor = (i % 2 !== 0) ? CONFIG.COLORS.ALTERNATE_ROW : CONFIG.COLORS.DEFAULT_BACKGROUND;
       for (let j = 0; j < lastCol; j++) {
-        if (!formulas[i][j]) { // 数式が入っているセルは背景色を変更しない
+        if (!formulas[i][j]) {
           backgroundColors[i][j] = baseColor;
         }
       }
 
-      // 特定の列の色を上書き
       if (progressCol) {
         const progressValue = safeTrim(row[progressCol - 1]);
         const progressColor = (progressValue === "")
-          ? baseColor // 空の場合は基本色に戻す
+          ? baseColor
           : getColor(PROGRESS_COLORS, progressValue, baseColor);
         
         backgroundColors[i][progressCol - 1] = progressColor;
-        if (mgmtNoCol) backgroundColors[i][mgmtNoCol - 1] = progressColor;
+        // ▼▼▼ 修正: 工数シートでも管理Noに色が付くように修正 ▼▼▼
+        if (mgmtNoCol && (sheetObject instanceof MainSheet || sheetObject instanceof InputSheet || sheet.getName().startsWith('View_'))) {
+          backgroundColors[i][mgmtNoCol - 1] = progressColor;
+        }
+        // ▲▲▲ 修正完了 ▲▲▲
       }
 
       if (sagyouKubunCol) {
