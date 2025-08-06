@@ -76,16 +76,17 @@ function extractTextFromPdf(file) {
   let tempDoc;
   try {
     const blob = file.getBlob();
-    // Drive API を使用 (V2)
-    const resource = { title: `temp_ocr_${file.getName()}`, mimeType: MimeType.GOOGLE_DOCS };
+    // ★★★ ここから修正 ★★★
+    // Drive APIに渡すリソース情報から mimeType を削除
+    const resource = { title: `temp_ocr_${file.getName()}` };
     const tempDocFile = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'ja' });
+    // ★★★ ここまで修正 ★★★
     tempDoc = DocumentApp.openById(tempDocFile.id);
     return tempDoc.getBody().getText();
   } catch(e) {
     throw new Error(`ファイル「${file.getName()}」のテキスト抽出に失敗しました: ${e.message}`);
   } finally {
     if (tempDoc) {
-      // 一時ファイルを完全に削除
       Drive.Files.remove(tempDoc.getId());
     }
   }
