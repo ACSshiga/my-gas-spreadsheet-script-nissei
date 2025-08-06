@@ -11,8 +11,6 @@ function syncMainToAllInputSheets() {
   const mainIndices = mainSheet.indices;
   const lastRow = mainSheet.getLastRow();
 
-  // ▼▼▼ 修正箇所 START ▼▼▼
-  // 「未着手」の自動入力ロジックをこの関数に統合
   if (lastRow >= mainSheet.startRow) {
     const range = mainSheet.sheet.getRange(
       mainSheet.startRow, 1,
@@ -35,7 +33,6 @@ function syncMainToAllInputSheets() {
       range.setValues(mainData);
     }
   }
-  // ▲▲▲ 修正箇所 END ▲▲▲
   
   const tantoushaList = mainSheet.getTantoushaList();
 
@@ -52,7 +49,6 @@ function syncMainToAllInputSheets() {
     return;
   }
 
-  // 最新の状態のメインシートデータを再取得
   const mainDataValues = mainSheet.sheet.getRange(
     mainSheet.startRow, 1, 
     mainSheet.getLastRow() - mainSheet.startRow + 1, 
@@ -104,25 +100,27 @@ function syncInputToMain(inputSheetName, editedRange) {
   const targetRowInfo = mainDataMap.get(uniqueKey);
   if (!targetRowInfo) return;
 
-  const valuesToUpdate = {};
+  const targetRowNum = targetRowInfo.rowNum;
   const editedCol = editedRange.getColumn();
+
+  // ▼▼▼ 修正箇所 START: セルを個別に更新する方式に変更 ▼▼▼
   if (editedCol === inputIndices.PROGRESS) {
     const newProgress = editedRowValues[inputIndices.PROGRESS - 1];
-    valuesToUpdate[mainIndices.PROGRESS] = newProgress;
-    // 仕掛日と完了日の自動記録
+    mainSheet.sheet.getRange(targetRowNum, mainIndices.PROGRESS).setValue(newProgress);
+
     const completionTriggers = getCompletionTriggerStatuses();
     const startDateTriggers = getStartDateTriggerStatuses();
-    const mainRowData = targetRowInfo.data;
-    const currentStartDate = mainRowData[mainIndices.START_DATE - 1];
-
-    if (!isValidDate(currentStartDate) && startDateTriggers.includes(newProgress)) {
-      valuesToUpdate[mainIndices.START_DATE] = new Date();
+    
+    const startDateCell = mainSheet.sheet.getRange(targetRowNum, mainIndices.START_DATE);
+    if (!isValidDate(startDateCell.getValue()) && startDateTriggers.includes(newProgress)) {
+      startDateCell.setValue(new Date());
     }
     
+    const completeDateCell = mainSheet.sheet.getRange(targetRowNum, mainIndices.COMPLETE_DATE);
     if (completionTriggers.includes(newProgress)) {
-       valuesToUpdate[mainIndices.COMPLETE_DATE] = new Date();
+       completeDateCell.setValue(new Date());
     } else {
-       valuesToUpdate[mainIndices.COMPLETE_DATE] = '';
+       completeDateCell.setValue('');
     }
   }
 
@@ -132,25 +130,14 @@ function syncInputToMain(inputSheetName, editedRange) {
     const hoursValues = inputSheet.sheet.getRange(editedRow, dateStartCol, 1, inputSheet.getLastColumn() - dateStartCol + 1).getValues()[0];
     totalHours = hoursValues.reduce((sum, h) => sum + toNumber(h), 0);
   }
-  valuesToUpdate[mainIndices.ACTUAL_HOURS] = totalHours;
-
-  valuesToUpdate[mainIndices.PROGRESS_EDITOR] = tantoushaName;
-  valuesToUpdate[mainSheet.indices.UPDATE_TS] = new Date();
-  
-  const updateRange = mainSheet.sheet.getRange(targetRowInfo.rowNum, 1, 1, mainSheet.getLastColumn());
-  const currentValues = updateRange.getValues()[0];
-  const currentFormulas = updateRange.getFormulas()[0];
-  const newRowData = currentValues.map((cellValue, i) => currentFormulas[i] || cellValue);
-
-  for (const [colIndex, value] of Object.entries(valuesToUpdate)) {
-    newRowData[colIndex - 1] = value;
-  }
-  updateRange.setValues([newRowData]);
+  mainSheet.sheet.getRange(targetRowNum, mainIndices.ACTUAL_HOURS).setValue(totalHours);
+  mainSheet.sheet.getRange(targetRowNum, mainIndices.PROGRESS_EDITOR).setValue(tantoushaName);
+  mainSheet.sheet.getRange(targetRowNum, mainIndices.UPDATE_TS).setValue(new Date());
+  // ▲▲▲ 修正箇所 END ▲▲▲
 }
 
 /**
  * この関数は syncMainToAllInputSheets に統合されたため、現在は使用されません。
- * 互換性のために残していますが、将来的には削除可能です。
  */
 function syncDefaultProgressToMain() {
   // 機能は syncMainToAllInputSheets に統合されました。
