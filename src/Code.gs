@@ -1,47 +1,14 @@
 /**
  * Code.gs
- * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
+ * イベントハンドラとカスタムメニューを管理する司令塔。
  */
-
-// =================================================================================
-// === トリガー設定 (初回に一度だけ手動実行) ===
-// =================================================================================
-
-/**
- * このプロジェクトで必要なトリガーをすべて作成・設定する関数です。
- * 初回セットアップ時や、トリガーを再設定したい場合に一度だけ手動で実行します。
- */
-function setupTriggers() {
-  // --- 既存のトリガーを一旦すべて削除 ---
-  const allTriggers = ScriptApp.getProjectTriggers();
-  allTriggers.forEach(trigger => {
-    ScriptApp.deleteTrigger(trigger);
-  });
-
-  // --- 1. 1時間ごとにドロップダウンリスト等を更新するトリガーを設定 ---
-  ScriptApp.newTrigger('periodicMaintenance')
-      .timeBased()
-      .everyHours(1)
-      .create();
-
-  // --- 2. 毎月1日に、次の月のカレンダーを自動で追加するトリガーを設定 ---
-  ScriptApp.newTrigger('addNextMonthColumnsToAllInputSheets')
-      .timeBased()
-      .onMonthDay(1)
-      .atHour(1) // 深夜1時台に実行
-      .create();
-      
-  SpreadsheetApp.getUi().alert('2種類の定期実行トリガー（毎時・毎月）を設定しました。');
-  Logger.log('定期実行トリガーが正常に設定されました。');
-}
-
 
 // =================================================================================
 // === イベントハンドラ (軽量化・改善版) ===
 // =================================================================================
 
 /**
- * onOpen: ファイルを開いた時に実行される処理を軽量化
+ * onOpen: ファイルを開いた時に実行される処理
  */
 function onOpen(e) {
   // カスタムメニューの作成
@@ -57,7 +24,7 @@ function onOpen(e) {
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addSeparator()
     .addItem('各種設定と書式を再適用', 'runAllManualMaintenance')
-    .addItem('次の月のカレンダーを追加', 'addNextMonthColumnsToAllInputSheets') // 手動メニューを追加
+    .addItem('次の月のカレンダーを追加', 'addNextMonthColumnsToAllInputSheets')
     .addSeparator()
     .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
