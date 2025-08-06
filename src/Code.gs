@@ -333,7 +333,6 @@ function colorizeSheet_(sheetObject) {
         const uniqueKey = `${kiban}_${sagyouKubun}`;
         if (uniqueKeys.has(uniqueKey)) {
           isDuplicate = true;
-   
         } else {
           uniqueKeys.add(uniqueKey);
         }
@@ -350,27 +349,45 @@ function colorizeSheet_(sheetObject) {
         restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
       }
     } else {
+      // 最初に交互の背景色を設定
+      const baseColor = (i % 2 !== 0) ? CONFIG.COLORS.ALTERNATE_ROW : CONFIG.COLORS.DEFAULT_BACKGROUND;
       for (let j = 0; j < lastCol; j++) {
-          if(!formulas[i][j]) backgroundColors[i][j] = CONFIG.COLORS.DEFAULT_BACKGROUND;
+        if (!formulas[i][j]) { // 数式が入っているセルは背景色を変更しない
+          backgroundColors[i][j] = baseColor;
+        }
       }
 
+      // 特定の列の色を上書き
       if (progressCol) {
         const progressValue = safeTrim(row[progressCol - 1]);
         const progressColor = (progressValue === "")
-          ? CONFIG.COLORS.DEFAULT_BACKGROUND
-          : getColor(PROGRESS_COLORS, progressValue);
+          ? baseColor // 空の場合は基本色に戻す
+          : getColor(PROGRESS_COLORS, progressValue, baseColor);
         
         backgroundColors[i][progressCol - 1] = progressColor;
         if (mgmtNoCol) backgroundColors[i][mgmtNoCol - 1] = progressColor;
       }
 
       if (sagyouKubunCol) {
-        backgroundColors[i][sagyouKubunCol - 1] = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]));
+        const color = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]), baseColor);
+        if (color !== baseColor) {
+          backgroundColors[i][sagyouKubunCol - 1] = color;
+        }
       }
 
       if (sheetObject instanceof MainSheet || sheet.getName().startsWith('View_')) {
-        if (tantoushaCol) backgroundColors[i][tantoushaCol - 1] = getColor(TANTOUSHA_COLORS, safeTrim(row[tantoushaCol - 1]));
-        if (toiawaseCol) backgroundColors[i][toiawaseCol - 1] = getColor(TOIAWASE_COLORS, safeTrim(row[toiawaseCol - 1]));
+        if (tantoushaCol) {
+          const color = getColor(TANTOUSHA_COLORS, safeTrim(row[tantoushaCol - 1]), baseColor);
+          if (color !== baseColor) {
+            backgroundColors[i][tantoushaCol - 1] = color;
+          }
+        }
+        if (toiawaseCol) {
+          const color = getColor(TOIAWASE_COLORS, safeTrim(row[toiawaseCol - 1]), baseColor);
+           if (color !== baseColor) {
+            backgroundColors[i][toiawaseCol - 1] = color;
+           }
+        }
       }
       if (sheetObject instanceof MainSheet && tantoushaCol) {
         normalRanges.push(sheet.getRange(startRow + i, tantoushaCol));
