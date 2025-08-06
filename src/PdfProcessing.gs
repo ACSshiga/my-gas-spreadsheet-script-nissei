@@ -61,8 +61,8 @@ function importFromDriveFolder() {
         const kishu = getValue(appText, /機種\s*(:|：)\s*([\s\S]*?)(?=机番:|機番:|納入先:|・機械納期:)/, 2);
         const kiban = getValue(appText, /機番\s*(:|：)\s*([\s\S]*?)(?=納入先:|・機械納期:|入庫予定日:)/, 2);
         // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        // 修正箇所：納入先を抽出する正規表現をより厳密なものに変更
-        const nounyusaki = getValue(appText, /納入先\s*[:：]\s*([\s\S]*?)(?=\s*・機械納期|\s*入庫予定日|\s*見積設計工数|\s*留意事項|\s*・設計予定期間|\n)/, 2);
+        // 修正箇所：正規表現のキャプチャグループを修正
+        const nounyusaki = getValue(appText, /納入先\s*([:：])\s*([\s\S]*?)(?=\s*・機械納期|\s*入庫予定日|\s*見積設計工数|\s*留意事項|\s*・設計予定期間|\n)/, 2);
         // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         
         const kikanMatch = appText.match(/設計予定期間:?\s*(\d+\s*月\s*\d+\s*日)\s*~\s*(\d+\s*月\s*\d+\s*日)/);
