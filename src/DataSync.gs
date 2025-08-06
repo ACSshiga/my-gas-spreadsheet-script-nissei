@@ -102,39 +102,52 @@ function syncInputToMain(inputSheetName, editedRange) {
 
   const targetRowNum = targetRowInfo.rowNum;
   const editedCol = editedRange.getColumn();
+  
+  // ▼▼▼ 修正箇所 START: リンクが消えない＆値が正しく反映されるロジックに修正 ▼▼▼
+  const targetRange = mainSheet.sheet.getRange(targetRowNum, 1, 1, mainSheet.getLastColumn());
+  const targetValues = targetRange.getValues()[0];
+  const targetFormulas = targetRange.getFormulas()[0];
 
-  // ▼▼▼ 修正箇所 START: セルを個別に更新する方式に変更 ▼▼▼
+  // 数式を保持した行データを作成
+  const newRowData = targetValues.map((cellValue, i) => targetFormulas[i] || cellValue);
+
+  // 1. 進捗の更新
   if (editedCol === inputIndices.PROGRESS) {
     const newProgress = editedRowValues[inputIndices.PROGRESS - 1];
-    mainSheet.sheet.getRange(targetRowNum, mainIndices.PROGRESS).setValue(newProgress);
+    newRowData[mainIndices.PROGRESS - 1] = newProgress;
 
     const completionTriggers = getCompletionTriggerStatuses();
     const startDateTriggers = getStartDateTriggerStatuses();
     
-    const startDateCell = mainSheet.sheet.getRange(targetRowNum, mainIndices.START_DATE);
-    if (!isValidDate(startDateCell.getValue()) && startDateTriggers.includes(newProgress)) {
-      startDateCell.setValue(new Date());
+    if (!isValidDate(newRowData[mainIndices.START_DATE - 1]) && startDateTriggers.includes(newProgress)) {
+      newRowData[mainIndices.START_DATE - 1] = new Date();
     }
     
-    const completeDateCell = mainSheet.sheet.getRange(targetRowNum, mainIndices.COMPLETE_DATE);
     if (completionTriggers.includes(newProgress)) {
-       completeDateCell.setValue(new Date());
+      newRowData[mainIndices.COMPLETE_DATE - 1] = new Date();
     } else {
-       completeDateCell.setValue('');
+      newRowData[mainIndices.COMPLETE_DATE - 1] = '';
     }
   }
 
+  // 2. 実績工数の更新
   let totalHours = 0;
   const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
   if (inputSheet.getLastColumn() >= dateStartCol) {
     const hoursValues = inputSheet.sheet.getRange(editedRow, dateStartCol, 1, inputSheet.getLastColumn() - dateStartCol + 1).getValues()[0];
     totalHours = hoursValues.reduce((sum, h) => sum + toNumber(h), 0);
   }
-  mainSheet.sheet.getRange(targetRowNum, mainIndices.ACTUAL_HOURS).setValue(totalHours);
-  mainSheet.sheet.getRange(targetRowNum, mainIndices.PROGRESS_EDITOR).setValue(tantoushaName);
-  mainSheet.sheet.getRange(targetRowNum, mainIndices.UPDATE_TS).setValue(new Date());
+  newRowData[mainIndices.ACTUAL_HOURS - 1] = totalHours;
+
+  // 3. 担当者と更新日時の更新
+  newRowData[mainIndices.PROGRESS_EDITOR - 1] = tantoushaName;
+  newRowData[mainIndices.UPDATE_TS - 1] = new Date();
+
+  // 4. 修正した行データを一括で書き戻す
+  targetRange.setValues([newRowData]);
   // ▲▲▲ 修正箇所 END ▲▲▲
 }
+
 
 /**
  * この関数は syncMainToAllInputSheets に統合されたため、現在は使用されません。
