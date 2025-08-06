@@ -105,13 +105,16 @@ function updateLinksForSameValue_(allValues, allFormulas, valueToMatch, valueCol
 
 /**
  * 指定されたプレフィックスに前方一致するすべての行に、ハイパーリンクを設定します。
+ * リンクの表示名は、フォルダ名と同じプレフィックスになります。
  */
 function updateLinksForModelPrefix_(allValues, allFormulas, prefixToMatch, valueColumn, linkColumn, url) {
   allValues.forEach((row, i) => {
     const fullValue = String(row[valueColumn - 1]).trim();
     if (fullValue.startsWith(prefixToMatch)) {
       if (!allFormulas[i][linkColumn - 1]) {
-        allFormulas[i][linkColumn - 1] = createHyperlinkFormula(url, fullValue);
+        // ▼▼▼ 修正箇所: 表示名をフォルダ名（prefixToMatch）に変更 ▼▼▼
+        allFormulas[i][linkColumn - 1] = createHyperlinkFormula(url, prefixToMatch);
+        // ▲▲▲ 修正完了 ▲▲▲
       }
     }
   });
