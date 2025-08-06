@@ -1,17 +1,13 @@
 /**
  * Code.gs
- * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
+ * イベントハンドラとカスタムメニューを管理する司令塔。
  */
 
 // =================================================================================
-// === イベントハンドラ (軽量化・改善版) ===
+// === イベントハンドラ ===
 // =================================================================================
 
-/**
- * onOpen: ファイルを開いた時に実行される処理
- */
 function onOpen(e) {
-  // カスタムメニューの作成
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('カスタムメニュー')
     .addItem('自分の担当案件のみ表示', 'createPersonalView')
@@ -31,13 +27,10 @@ function onOpen(e) {
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
 
-  // onOpenで実行する処理を、データ同期に限定
   syncMainToAllInputSheets();
+  colorizeAllSheets();
 }
 
-/**
- * onEdit: 編集イベントを処理する司令塔 (待機処理を追加)
- */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
   
@@ -84,26 +77,15 @@ function onEdit(e) {
 // === メンテナンス用関数 ===
 // =================================================================================
 
-/**
- * 定期実行（毎時）で呼び出される関数
- */
 function periodicMaintenance() {
   setupAllDataValidations();
 }
 
-/**
- * 手動実行用の統合関数
- */
 function runAllManualMaintenance() {
   SpreadsheetApp.getActiveSpreadsheet().toast('各種設定と書式を適用中...', '処理中', 3);
-  // ★★★ 処理順序を修正 ★★★
-  // 1. 基本的な書式（フォント、サイズ、列幅、行高）を先に設定
   applyStandardFormattingToAllSheets();
-  // 2. その上で、ヘッダーの特殊な書式を設定
   applyStandardFormattingToMainSheet();
-  // 3. 最後に、データに応じた色付け処理を実行
   colorizeAllSheets();
-  // 4. 最後にドロップダウンリストを設定
   setupAllDataValidations();
   SpreadsheetApp.getActiveSpreadsheet().toast('適用が完了しました。', '完了', 3);
 }
@@ -113,34 +95,36 @@ function runAllManualMaintenance() {
 // =================================================================================
 
 /**
- * 全てのシートに標準の書式（フォント、フォントサイズ、列幅、行高）を適用します。
+ * 全てのシートに標準の書式（フォント、フォントサイズ）を適用します。
  */
 function applyStandardFormattingToAllSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const allSheets = ss.getSheets();
   
-  ss.toast('全シートの書式を整形中...', '処理中');
+  ss.toast('フォントとサイズを整形中...', '処理中');
   
   allSheets.forEach(sheet => {
+    // ★★★ここからが改善箇所★★★
+    // 工数シートは書式設定の対象外にする
+    if (sheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+      return;
+    }
+    // ★★★ここまでが改善箇所★★★
     try {
       const dataRange = sheet.getDataRange();
       if (dataRange.isBlank()) return;
 
-      // フォントとサイズを設定
+      // フォントとサイズのみを設定
       dataRange.setFontFamily("Arial").setFontSize(12);
       
-      // ★★★ 行の高さの処理を修正 ★★★
-      // 列幅はデータに合わせ、行高は25pxに統一して見た目を整える
-      sheet.autoResizeColumns(1, sheet.getLastColumn());
-      sheet.setRowHeights(1, sheet.getLastRow(), 25);
-
     } catch (e) {
       Logger.log(`シート「${sheet.getName()}」の書式設定中にエラー: ${e.message}`);
     }
   });
   
-  ss.toast('全シートの書式を更新しました。', '完了', 3);
+  ss.toast('フォントとサイズの更新が完了しました。', '完了', 3);
 }
+
 
 /**
  * メインシートにヘッダーの色付けとウィンドウ枠の固定を適用します。
@@ -150,9 +134,9 @@ function applyStandardFormattingToMainSheet() {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
     if (sheet) {
       const headerRange = sheet.getRange(1, 1, 1, sheet.getMaxColumns());
-      headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND);
-      headerRange.setFontColor('#ffffff');
-      headerRange.setFontWeight('bold');
+      headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND)
+                 .setFontColor('#ffffff')
+                 .setFontWeight('bold');
       
       sheet.setFrozenRows(1);
       sheet.setFrozenColumns(4);
@@ -161,6 +145,7 @@ function applyStandardFormattingToMainSheet() {
     Logger.log(`メインシートの標準フォーマット適用中にエラー: ${e.message}`);
   }
 }
+
 
 // =================================================================================
 // === 個人用ビュー（仮想シート）機能 ===
@@ -194,7 +179,6 @@ function createPersonalView() {
   const viewSheet = ss.insertSheet(viewSheetName, 0);
   viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
   
-  // Viewシートにも標準書式とメインシートのヘッダー書式を適用
   applyStandardFormattingToAllSheets();
   applyStandardFormattingToMainSheet();
   
@@ -305,12 +289,15 @@ function colorizeAllSheets() {
 
     allSheets.forEach(sheet => {
       const sheetName = sheet.getName();
+      
+      // 工数シートは色付け処理の対象外にする
+      if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+        return; // 次のシートへ
+      }
+
       try {
         if (sheetName === CONFIG.SHEETS.MAIN) {
           colorizeSheet_(new MainSheet());
-        } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-          const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
-          colorizeSheet_(new InputSheet(tantoushaName));
         } else if (sheetName.startsWith('View_')) {
           const viewSheetObj = {
             getSheet: () => sheet,
@@ -324,11 +311,12 @@ function colorizeAllSheets() {
         Logger.log(`シート「${sheetName}」の色付け処理中にエラー: ${e.message}`);
       }
     });
-    logWithTimestamp("全シートの色付け処理が完了しました。");
+    logWithTimestamp("メインシートとViewシートの色付け処理が完了しました。");
   } catch (error) {
     Logger.log(`色付け処理でエラーが発生しました: ${error.stack}`);
   }
 }
+
 
 function colorizeSheet_(sheetObject) {
   const PROGRESS_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
@@ -342,6 +330,7 @@ function colorizeSheet_(sheetObject) {
   if (lastRow < startRow) return;
   const dataRows = lastRow - startRow + 1;
   const lastCol = sheet.getLastColumn();
+  if (lastCol === 0) return;
   const fullRange = sheet.getRange(startRow, 1, dataRows, lastCol);
 
   const values = fullRange.getValues();
@@ -401,7 +390,7 @@ function colorizeSheet_(sheetObject) {
         const progressColor = (progressValue === "") ? baseColor : getColor(PROGRESS_COLORS, progressValue, baseColor);
         
         backgroundColors[i][progressCol - 1] = progressColor;
-        if (mgmtNoCol && (sheetObject instanceof MainSheet || sheetObject instanceof InputSheet || sheet.getName().startsWith('View_'))) {
+        if (mgmtNoCol) {
           backgroundColors[i][mgmtNoCol - 1] = progressColor;
         }
       }
