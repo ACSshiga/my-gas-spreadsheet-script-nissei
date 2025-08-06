@@ -62,7 +62,7 @@ class MainSheet extends SheetService {
 
 
 // =================================================================================
-// === 工数シートを操作するためのクラス ===
+// === 工数シートを操作するためのクラス (軽量化版) ===
 // =================================================================================
 class InputSheet extends SheetService {
   constructor(tantoushaName) {
@@ -70,79 +70,7 @@ class InputSheet extends SheetService {
     super(sheetName);
     this.tantoushaName = tantoushaName;
     this.startRow = CONFIG.DATA_START_ROW.INPUT;
-    
-    if (this.sheet.getLastRow() < 2) {
-      this.initializeSheet();
-    }
     this.indices = getColumnIndices(this.sheet, INPUT_SHEET_HEADERS);
-    
-    this.filterDateColumns();
-  }
-
-  initializeSheet() {
-    this.sheet.clear();
-    const headers = Object.values(INPUT_SHEET_HEADERS);
-    this.sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold");
-    
-    const separatorCol = headers.indexOf("");
-    if (separatorCol !== -1) {
-      this.sheet.getRange(2, separatorCol + 1).setValue("日次合計").setHorizontalAlignment("right");
-    }
-
-    const dateHeaders = [];
-    const sumFormulas = [];
-    const today = new Date();
-    const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const datesToGenerate = [prevMonth, thisMonth];
-    let currentCol = headers.length + 1;
-    datesToGenerate.forEach(date => {
-      const year = date.getFullYear();
-      const month = date.getMonth();
-      const daysInMonth = new Date(year, month + 1, 0).getDate();
-      for (let i = 1; i <= daysInMonth; i++) {
-        dateHeaders.push(new Date(year, month, i));
-        const colLetter = this.sheet.getRange(1, currentCol).getA1Notation().replace("1", "");
-        sumFormulas.push(`=IFERROR(SUM(${colLetter}${this.startRow}:${colLetter}))`);
-        currentCol++;
-      }
-    });
-    if (dateHeaders.length > 0) {
-      this.sheet.getRange(1, headers.length + 1, 1, dateHeaders.length).setValues([dateHeaders]).setNumberFormat("M/d");
-      this.sheet.getRange(2, headers.length + 1, 1, sumFormulas.length).setFormulas([sumFormulas]);
-    }
-
-    this.sheet.setFrozenRows(2);
-    this.sheet.setFrozenColumns(7);
-  }
-  
-  filterDateColumns() {
-    const sheet = this.sheet;
-    const lastCol = sheet.getLastColumn();
-    const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
-
-    if (lastCol < dateStartCol) return;
-
-    sheet.showColumns(dateStartCol, lastCol - dateStartCol + 1);
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth();
-    const headerDates = sheet.getRange(1, dateStartCol, 1, lastCol - dateStartCol + 1).getValues()[0];
-    headerDates.forEach((date, i) => {
-      if (isValidDate(date)) {
-        const dateYear = date.getFullYear();
-        const dateMonth = date.getMonth();
-        
-        const isCurrentMonth = (dateYear === currentYear && dateMonth === currentMonth);
-        const isPreviousMonth = (currentMonth === 0) 
-            ? (dateYear === currentYear - 1 && dateMonth === 11) 
-            : (dateYear === currentYear && dateMonth === currentMonth - 1);
-
-        if (!isCurrentMonth && !isPreviousMonth) {
-          sheet.hideColumns(dateStartCol + i);
-        }
-      }
-    });
   }
 
   clearData() {
@@ -179,7 +107,6 @@ class InputSheet extends SheetService {
     const lastRow = this.getLastRow();
     if (lastRow < this.startRow) return new Map();
     
-    // 進捗列までのデータだけを効率的に取得
     const lastColToRead = Math.max(this.indices.MGMT_NO, this.indices.SAGYOU_KUBUN, this.indices.PROGRESS);
     const values = this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, lastColToRead).getValues();
     
@@ -195,4 +122,90 @@ class InputSheet extends SheetService {
     });
     return dataMap;
   }
+}
+
+// =================================================================================
+// === カレンダーと休日のメンテナンス関数 (ここからが追加部分) ===
+// =================================================================================
+
+/**
+ * 全ての工数シートをチェックし、必要であれば次の月の列を追加し、
+ * その列に対して土日祝日の書式設定を適用する関数。
+ * 月に一度のトリガーや、手動メニューからの実行を想定。
+ */
+function addNextMonthColumnsToAllInputSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const allSheets = ss.getSheets();
+  const today = new Date();
+  const targetYear = today.getMonth() === 11 ? today.getFullYear() + 1 : today.getFullYear();
+  const targetMonth = today.getMonth() === 11 ? 0 : today.getMonth() + 1;
+
+  // 祝日リストを準備
+  const holidays = new Set([...getJapaneseHolidays(targetYear)]);
+  const holidayStrings = Array.from(holidays);
+
+  allSheets.forEach(sheet => {
+    if (sheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+      try {
+        const lastCol = sheet.getLastColumn();
+        if (lastCol === 0) return; // 空のシートはスキップ
+        const dateHeaderRange = sheet.getRange(1, 1, 1, lastCol);
+        const dateHeaderValues = dateHeaderRange.getValues()[0];
+
+        let lastDate = null;
+        for (let i = lastCol - 1; i > 0; i--) {
+          if (dateHeaderValues[i] instanceof Date) {
+            lastDate = dateHeaderValues[i];
+            break;
+          }
+        }
+        
+        if (lastDate && lastDate.getFullYear() === targetYear && lastDate.getMonth() === targetMonth) {
+           Logger.log(`シート「${sheet.getName()}」は既に更新済みのためスキップします。`);
+           return;
+        }
+
+        // --- 次の月の列を追加 ---
+        const daysInNextMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+        const newDateHeaders = [];
+        for (let i = 1; i <= daysInNextMonth; i++) {
+          newDateHeaders.push(new Date(targetYear, targetMonth, i));
+        }
+
+        const newColumnStart = lastCol + 1;
+        const newRange = sheet.getRange(1, newColumnStart, 1, daysInNextMonth);
+        newRange.setValues([newDateHeaders]).setNumberFormat("M/d");
+
+        // --- 追加した列にだけ、条件付き書式を適用 ---
+        const rules = sheet.getConditionalFormatRules();
+        
+        // 週末用のルール
+        const weekendRule = SpreadsheetApp.newConditionalFormatRule()
+          .whenFormulaSatisfied(`=OR(WEEKDAY(${newRange.getA1Notation().split(':')[0]})=1, WEEKDAY(${newRange.getA1Notation().split(':')[0]})=7)`)
+          .setBackground(CONFIG.COLORS.WEEKEND_HOLIDAY)
+          .setRanges([newRange])
+          .build();
+        rules.push(weekendRule);
+
+        // 祝日用のルール
+        if (holidayStrings.length > 0) {
+          const holidayFormula = `=MATCH(TEXT(${newRange.getA1Notation().split(':')[0]},"yyyy-mm-dd"), {${holidayStrings.map(d => `"${d}"`).join(",")}} ,0)`;
+          const holidayRule = SpreadsheetApp.newConditionalFormatRule()
+            .whenFormulaSatisfied(holidayFormula)
+            .setBackground(CONFIG.COLORS.WEEKEND_HOLIDAY)
+            .setRanges([newRange])
+            .build();
+          rules.push(holidayRule);
+        }
+        
+        sheet.setConditionalFormatRules(rules);
+
+        Logger.log(`シート「${sheet.getName()}」に${targetMonth + 1}月分のカレンダーを追加し、書式設定を行いました。`);
+
+      } catch (e) {
+        Logger.log(`「${sheet.getName()}」のカレンダー更新中にエラー: ${e.message}`);
+      }
+    }
+  });
+  SpreadsheetApp.getActiveSpreadsheet().toast('全工数シートのカレンダーを更新しました。');
 }
