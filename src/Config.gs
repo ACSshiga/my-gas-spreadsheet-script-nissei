@@ -21,8 +21,9 @@ const CONFIG = {
   },
   COLORS: {
     DEFAULT_BACKGROUND: '#ffffff',
-    // ▼▼▼ この1行を追加 ▼▼▼
     ALTERNATE_ROW:      '#f9f9f9', // 交互の背景色用の薄いグレー
+    // ▼▼▼ この1行を追加 ▼▼▼
+    HEADER_BACKGROUND:  '#4f5459', // ヘッダー用の背景色
     // ▲▲▲ この1行を追加 ▲▲▲
     WEEKEND_HOLIDAY:    '#f2f2f2'
   },

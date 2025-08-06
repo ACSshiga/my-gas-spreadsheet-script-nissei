@@ -33,6 +33,11 @@ function onOpen(e) {
     .addSeparator()
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
+
+  // ▼▼▼ この1行を追加 ▼▼▼
+  applyStandardFormattingToMainSheet();
+  // ▲▲▲ この1行を追加 ▲▲▲
+
   setupAllDataValidations();
   syncDefaultProgressToMain();
   colorizeAllSheets();
@@ -90,6 +95,28 @@ function runColorizeAllSheets() {
   SpreadsheetApp.getActiveSpreadsheet().toast('処理が完了しました。', '完了', 3);
 }
 
+// =================================================================================
+// === ▼▼▼ 新しい関数を追加 ▼▼▼ ===
+// =================================================================================
+/**
+ * メインシートにヘッダーの色付けとウィンドウ枠の固定を適用します。
+ */
+function applyStandardFormattingToMainSheet() {
+  try {
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
+    if (sheet) {
+      const headerRange = sheet.getRange(1, 1, 1, sheet.getMaxColumns());
+      headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND);
+      headerRange.setFontColor('#ffffff'); // 文字色を白に
+      headerRange.setFontWeight('bold');
+      
+      sheet.setFrozenRows(1);
+      sheet.setFrozenColumns(4); // D列までを固定
+    }
+  } catch(e) {
+    Logger.log(`メインシートの標準フォーマット適用中にエラー: ${e.message}`);
+  }
+}
 
 // =================================================================================
 // === 工数シート表示切替機能 ===
@@ -153,6 +180,20 @@ function createPersonalView() {
   const viewSheetName = `View_${tantoushaName}`;
   const viewSheet = ss.insertSheet(viewSheetName, 0);
   viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
+
+  // ▼▼▼ ビューシートに書式設定を適用 ▼▼▼
+  try {
+    const headerRange = viewSheet.getRange(1, 1, 1, viewSheet.getMaxColumns());
+    headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND);
+    headerRange.setFontColor('#ffffff');
+    headerRange.setFontWeight('bold');
+    viewSheet.setFrozenRows(1);
+    viewSheet.setFrozenColumns(4);
+  } catch(e) {
+    Logger.log(`ビューシートの書式設定エラー: ${e.message}`);
+  }
+  // ▲▲▲ 書式設定の適用完了 ▲▲▲
+
   if (personalData.length > 1) {
     viewSheet.getRange(1, 1, personalData.length, headers.length).createFilter();
   }
