@@ -80,57 +80,88 @@ function syncMainToAllInputSheets() {
 }
 
 // =================================================================================
-// === 工数 → メインシートへの同期処理 ===
+// === 工数 → メインシートへの同期処理 (診断ログ強化版) ===
 // =================================================================================
 function syncInputToMain(inputSheetName, editedRange) {
+  Logger.log(`\n\n===== 同期処理開始 (syncInputToMain) =====`);
+  Logger.log(`編集されたシート: ${inputSheetName}, 編集されたセル: ${editedRange.getA1Notation()}`);
+
   const tantoushaName = inputSheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
   const inputSheet = new InputSheet(tantoushaName);
   const mainSheet = new MainSheet();
   const mainDataMap = mainSheet.getDataMap();
 
   const editedRow = editedRange.getRow();
-  if (editedRow < inputSheet.startRow) return;
+  if (editedRow < inputSheet.startRow) {
+    Logger.log(`編集された行(${editedRow}行目)はヘッダー領域のため処理を終了します。`);
+    Logger.log(`========================================`);
+    return;
+  }
+
+  Logger.log(`メインシートのデータマップから ${mainDataMap.size} 件のキーを読み込みました。`);
 
   const editedRowValues = inputSheet.sheet.getRange(editedRow, 1, 1, inputSheet.getLastColumn()).getValues()[0];
   const inputIndices = inputSheet.indices;
   const mainIndices = mainSheet.indices;
+
   const mgmtNo = editedRowValues[inputIndices.MGMT_NO - 1];
   const sagyouKubun = editedRowValues[inputIndices.SAGYOU_KUBUN - 1];
+
+  Logger.log(`工数シートの ${editedRow} 行目からキーを読み取りました:`);
+  Logger.log(`  - 管理No: 「${mgmtNo}」 (型: ${typeof mgmtNo})`);
+  Logger.log(`  - 作業区分: 「${sagyouKubun}」 (型: ${typeof sagyouKubun})`);
+
+  if (!mgmtNo || !sagyouKubun) {
+    Logger.log(`キー（管理Noまたは作業区分）が空のため、処理を中断します。`);
+    Logger.log(`========================================`);
+    return;
+  }
+
   const uniqueKey = `${mgmtNo}_${sagyouKubun}`;
+  Logger.log(`作成された検索キー: 「${uniqueKey}」`);
+
   const targetRowInfo = mainDataMap.get(uniqueKey);
-  if (!targetRowInfo) return;
+
+  if (!targetRowInfo) {
+    Logger.log(`[エラー!] 作成された検索キー「${uniqueKey}」がメインシートのデータマップに見つかりませんでした。`);
+    Logger.log(`メインシートにこの「管理No」と「作業区分」の組み合わせが存在するか、完全一致（スペース等含む）しているか確認してください。`);
+    Logger.log(`===== 同期処理終了 (対象が見つからず) =====`);
+    return;
+  }
+
+  Logger.log(`[成功] メインシートで一致する行を発見しました。行番号: ${targetRowInfo.rowNum}`);
 
   const targetRowNum = targetRowInfo.rowNum;
   const editedCol = editedRange.getColumn();
-  
-  // ▼▼▼ 修正箇所 START: リンクが消えない＆値が正しく反映されるロジックに修正 ▼▼▼
+
   const targetRange = mainSheet.sheet.getRange(targetRowNum, 1, 1, mainSheet.getLastColumn());
   const targetValues = targetRange.getValues()[0];
   const targetFormulas = targetRange.getFormulas()[0];
-
-  // 数式を保持した行データを作成
   const newRowData = targetValues.map((cellValue, i) => targetFormulas[i] || cellValue);
 
-  // 1. 進捗の更新
+  Logger.log(`メインシートの ${targetRowNum} 行目の更新処理を開始します...`);
+
   if (editedCol === inputIndices.PROGRESS) {
     const newProgress = editedRowValues[inputIndices.PROGRESS - 1];
     newRowData[mainIndices.PROGRESS - 1] = newProgress;
+    Logger.log(`  -> 進捗を「${newProgress}」に更新します。`);
 
     const completionTriggers = getCompletionTriggerStatuses();
     const startDateTriggers = getStartDateTriggerStatuses();
-    
+
     if (!isValidDate(newRowData[mainIndices.START_DATE - 1]) && startDateTriggers.includes(newProgress)) {
       newRowData[mainIndices.START_DATE - 1] = new Date();
+      Logger.log(`  -> 仕掛日を自動入力しました。`);
     }
-    
+
     if (completionTriggers.includes(newProgress)) {
       newRowData[mainIndices.COMPLETE_DATE - 1] = new Date();
+      Logger.log(`  -> 完了日を自動入力しました。`);
     } else {
       newRowData[mainIndices.COMPLETE_DATE - 1] = '';
     }
   }
 
-  // 2. 実績工数の更新
   let totalHours = 0;
   const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
   if (inputSheet.getLastColumn() >= dateStartCol) {
@@ -138,20 +169,12 @@ function syncInputToMain(inputSheetName, editedRange) {
     totalHours = hoursValues.reduce((sum, h) => sum + toNumber(h), 0);
   }
   newRowData[mainIndices.ACTUAL_HOURS - 1] = totalHours;
+  Logger.log(`  -> 実績工数を「${totalHours}」に更新します。`);
 
-  // 3. 担当者と更新日時の更新
   newRowData[mainIndices.PROGRESS_EDITOR - 1] = tantoushaName;
   newRowData[mainIndices.UPDATE_TS - 1] = new Date();
 
-  // 4. 修正した行データを一括で書き戻す
   targetRange.setValues([newRowData]);
-  // ▲▲▲ 修正箇所 END ▲▲▲
-}
-
-
-/**
- * この関数は syncMainToAllInputSheets に統合されたため、現在は使用されません。
- */
-function syncDefaultProgressToMain() {
-  // 機能は syncMainToAllInputSheets に統合されました。
+  Logger.log(`メインシートへの書き込みが完了しました。`);
+  Logger.log(`===== 同期処理正常終了 =====`);
 }
