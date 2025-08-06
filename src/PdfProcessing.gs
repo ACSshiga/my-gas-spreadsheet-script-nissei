@@ -7,10 +7,11 @@
  * 指定されたGoogle DriveフォルダからPDFファイルを一括でインポートします。
  */
 function importFromDriveFolder() {
+  const ui = SpreadsheetApp.getUi(); // ★★★ UI操作用の変数を最初に定義 ★★★
   try {
     if (CONFIG.FOLDERS.IMPORT_SOURCE_FOLDER === "ここに「申請書インポート用」のIDを貼り付け" || 
         CONFIG.FOLDERS.PROCESSED_FOLDER === "ここに「処理済み申請書」のIDを貼り付け") {
-      SpreadsheetApp.getUi().alert('エラー: Config.gsファイルにインポート用のフォルダIDが正しく設定されていません。');
+      ui.alert('エラー: Config.gsファイルにインポート用のフォルダIDが正しく設定されていません。');
       return;
     }
 
@@ -25,11 +26,11 @@ function importFromDriveFolder() {
     const fileCount = filesForProcessing.length;
 
     if (fileCount === 0) {
-      SpreadsheetApp.getUi().alert('インポート用フォルダ内にPDFファイルが見つかりませんでした。');
+      ui.alert('インポート用フォルダ内にPDFファイルが見つかりませんでした。');
       return;
     }
     
-    SpreadsheetApp.getUi().alert(`インポート用フォルダ内で ${fileCount} 個のPDFファイルが見つかりました。処理を開始します。`);
+    ui.alert(`インポート用フォルダ内で ${fileCount} 個のPDFファイルが見つかりました。処理を開始します。`);
 
     let totalImportedCount = 0;
     const allNewRows = [];
@@ -84,16 +85,20 @@ function importFromDriveFolder() {
       const sheet = mainSheet.getSheet();
       const lastRow = sheet.getLastRow();
       sheet.getRange(lastRow + 1, 1, allNewRows.length, allNewRows[0].length).setValues(allNewRows);
-      SpreadsheetApp.getUi().toast(`${totalImportedCount}個のファイルから ${allNewRows.length}件のデータをインポートしました。`);
+      // ★★★ ここから修正 ★★★
+      ui.toast(`${totalImportedCount}個のファイルから ${allNewRows.length}件のデータをインポートしました。`);
+      // ★★★ ここまで修正 ★★★
       syncDefaultProgressToMain();
       colorizeAllSheets();
     } else if (totalImportedCount > 0) {
-      SpreadsheetApp.getUi().toast(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。`);
+      // ★★★ ここから修正 ★★★
+      ui.toast(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。`);
+      // ★★★ ここまで修正 ★★★
     }
 
   } catch (e) {
     Logger.log(e.stack);
-    SpreadsheetApp.getUi().alert(`エラーが発生しました: ${e.message}`);
+    ui.alert(`エラーが発生しました: ${e.message}`);
   }
 }
 
@@ -123,7 +128,6 @@ function extractTextFromPdf(file) {
  */
 function getValue(text, regex) {
   const match = text.match(regex);
-  // 改行やタブを半角スペースに置換してから返す
   return match && match[1] ? match[1].replace(/[\n\r\t]/g, ' ').trim() : '';
 }
 
