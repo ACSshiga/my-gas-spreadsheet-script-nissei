@@ -156,10 +156,40 @@ function logWithTimestamp(message) {
   console.log(`[${timestamp}] ${message}`);
 }
 
+/**
+ * スクリプトが保持する全てのキャッシュをクリアします。
+ */
 function clearScriptCache() {
   try {
     const cache = CacheService.getScriptCache();
-    cache.removeAll();
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const allSheets = ss.getSheets();
+    const keysToRemove = [];
+
+    // 1. 各シートの列番号キャッシュのキーを追加
+    allSheets.forEach(sheet => {
+      keysToRemove.push(`col_indices_${sheet.getSheetId()}`);
+    });
+
+    // 2. マスタデータ関連のキャッシュキーを追加
+    keysToRemove.push('completion_trigger_statuses');
+    keysToRemove.push('startdate_trigger_statuses');
+    keysToRemove.push(`holidays_${new Date().getFullYear()}`);
+    const masterSheets = [
+        CONFIG.SHEETS.SHINCHOKU_MASTER,
+        CONFIG.SHEETS.TANTOUSHA_MASTER,
+        CONFIG.SHEETS.SAGYOU_KUBUN_MASTER,
+        CONFIG.SHEETS.TOIAWASE_MASTER
+    ];
+    masterSheets.forEach(sheetName => {
+        keysToRemove.push(`color_map_${sheetName}`);
+    });
+
+    // 3. 収集したキーを全て使ってキャッシュを削除
+    if (keysToRemove.length > 0) {
+      cache.removeAll(keysToRemove);
+    }
+
     SpreadsheetApp.getActiveSpreadsheet().toast('スクリプトのキャッシュをクリアしました。', '完了', 3);
     logWithTimestamp("スクリプトのキャッシュがクリアされました。");
   } catch (e) {
