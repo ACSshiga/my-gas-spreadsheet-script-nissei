@@ -31,7 +31,7 @@ function onOpen(e) {
     .addItem('重複チェックと色付けを再実行', 'runColorizeAllSheets')
     .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
     .addSeparator()
-    .addItem('申請書からインポート', 'showImportDialog')
+    .addItem('申請書ファイルからインポート', 'showImportDialog')
     .addToUi();
   
   setupAllDataValidations();
@@ -40,13 +40,13 @@ function onOpen(e) {
 }
 
 /**
- * 申請書インポート用のダイアログを表示します。
+ * 申請書ファイルアップロード用のダイアログを表示します。
  */
 function showImportDialog() {
-  const html = HtmlService.createHtmlOutputFromFile('ImportDialog')
+  const html = HtmlService.createHtmlOutputFromFile('ImportFileDialog')
       .setWidth(400)
-      .setHeight(400);
-  SpreadsheetApp.getUi().showModalDialog(html, '申請書テキストのインポート');
+      .setHeight(250);
+  SpreadsheetApp.getUi().showModalDialog(html, '申請書ファイルのインポート');
 }
 
 

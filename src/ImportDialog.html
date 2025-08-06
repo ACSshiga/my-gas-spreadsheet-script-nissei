@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+    <style>
+      body { padding: 20px; text-align: center; }
+      #upload-status { margin-top: 15px; color: #666; }
+    </style>
+  </head>
+  <body>
+    <h4>PDFファイルを選択してください</h4>
+    <input type="file" id="pdf-file" accept=".pdf">
+    <br><br>
+    <button class="action" id="import-btn">インポート実行</button>
+    <div id="upload-status"></div>
+
+    <script>
+      document.getElementById('import-btn').addEventListener('click', function() {
+        var file = document.getElementById('pdf-file').files[0];
+        if (!file) {
+          alert('ファイルが選択されていません。');
+          return;
+        }
+
+        var btn = this;
+        var statusDiv = document.getElementById('upload-status');
+        
+        btn.textContent = '処理中...';
+        btn.disabled = true;
+        statusDiv.textContent = 'ファイルを読み込んでいます...';
+
+        var fr = new FileReader();
+        fr.onload = function(e) {
+          var fileBytes = new Uint8Array(this.result);
+          var data = {
+            mimeType: file.type,
+            fileName: file.name,
+            bytes: Array.from(fileBytes)
+          };
+          
+          statusDiv.textContent = 'サーバーでデータを処理しています...';
+          google.script.run
+            .withSuccessHandler(function(result) {
+              google.script.host.close();
+            })
+            .withFailureHandler(function(error) {
+              alert('エラーが発生しました: ' + error.message);
+              btn.textContent = 'インポート実行';
+              btn.disabled = false;
+              statusDiv.textContent = '';
+            })
+            .importDataFromPdfFile(data);
+        };
+        fr.readAsArrayBuffer(file);
+      });
+    </script>
+  </body>
+</html>
