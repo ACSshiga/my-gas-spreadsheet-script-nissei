@@ -1,63 +1,85 @@
 /**
  * Code.gs
- * イベントハンドラとカスタムメニューを管理する司令塔。
+ * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
  */
 
 // =================================================================================
-// === イベントハンドラ ===
+// === トリガー設定 (初回に一度だけ手動実行) ===
 // =================================================================================
 
-function onOpen(e) {
-  const ui = SpreadsheetApp.getUi();
-  const menu = ui.createMenu('カスタムメニュー');
-  const activeSheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  
-  if (activeSheet.getName() === CONFIG.SHEETS.MAIN || activeSheet.getName().startsWith('View_')) {
-    menu.addItem('自分の担当案件のみ表示', 'createPersonalView');
-    menu.addItem('表示を更新', 'refreshPersonalView') 
-    menu.addItem('フィルタ表示を終了', 'removePersonalView');
-  } 
-  else if (activeSheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-    menu.addItem('すべての月を表示', 'showAllDateColumns');
-    menu.addItem('表示を当月・前月に戻す', 'hideOldDateColumns');
-  }
+/**
+ * このプロジェクトで必要なトリガーをすべて作成・設定する関数です。
+ * 初回セットアップ時や、トリガーを再設定したい場合に一度だけ手動で実行します。
+ */
+function setupTriggers() {
+  // --- 既存のトリガーを一旦すべて削除 ---
+  const allTriggers = ScriptApp.getProjectTriggers();
+  allTriggers.forEach(trigger => {
+    ScriptApp.deleteTrigger(trigger);
+  });
 
-  menu.addSeparator()
+  // --- 1. 1時間ごとにドロップダウンリスト等を更新するトリガーを設定 ---
+  ScriptApp.newTrigger('periodicMaintenance')
+      .timeBased()
+      .everyHours(1)
+      .create();
+
+  // --- 2. 毎月1日に、次の月のカレンダーを自動で追加するトリガーを設定 ---
+  ScriptApp.newTrigger('addNextMonthColumnsToAllInputSheets')
+      .timeBased()
+      .onMonthDay(1)
+      .atHour(1) // 深夜1時台に実行
+      .create();
+      
+  SpreadsheetApp.getUi().alert('2種類の定期実行トリガー（毎時・毎月）を設定しました。');
+  Logger.log('定期実行トリガーが正常に設定されました。');
+}
+
+
+// =================================================================================
+// === イベントハンドラ (軽量化・改善版) ===
+// =================================================================================
+
+/**
+ * onOpen: ファイルを開いた時に実行される処理を軽量化
+ */
+function onOpen(e) {
+  // カスタムメニューの作成
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('カスタムメニュー')
+    .addItem('自分の担当案件のみ表示', 'createPersonalView')
+    .addItem('表示を更新', 'refreshPersonalView') 
+    .addItem('フィルタ表示を終了', 'removePersonalView')
+    .addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
     .addSeparator()
     .addItem('全資料フォルダ作成', 'bulkCreateMaterialFolders')
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addSeparator()
-    .addItem('重複チェックと色付けを再実行', 'runColorizeAllSheets')
-    .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
+    .addItem('各種設定と書式を再適用', 'runAllManualMaintenance')
+    .addItem('次の月のカレンダーを追加', 'addNextMonthColumnsToAllInputSheets') // 手動メニューを追加
     .addSeparator()
+    .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
-  applyStandardFormattingToMainSheet();
-  setupAllDataValidations();
+
+  // onOpenで実行する処理を、データ同期に限定
   syncMainToAllInputSheets();
-  colorizeAllSheets();
 }
 
 /**
- * 申請書ファイルアップロード用のダイアログを表示します。
- */
-function showImportDialog() {
-  const html = HtmlService.createHtmlOutputFromFile('ImportFileDialog')
-      .setWidth(400)
-      .setHeight(250);
-  SpreadsheetApp.getUi().showModalDialog(html, '申請書ファイルのインポート');
-}
-
-
-/**
- * スプレッドシートの編集イベントを処理する司令塔
+ * onEdit: 編集イベントを処理する司令塔 (待機処理を追加)
  */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
+  
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) {
-    Logger.log('先行する処理が実行中のため、今回の編集イベントはスキップされました。');
+  // 他の処理が終わるまで最大30秒待機する
+  try {
+    lock.waitLock(30000); 
+  } catch (err) {
+    Logger.log('ロックの待機中にタイムアウトしました。');
+    SpreadsheetApp.getActiveSpreadsheet().toast('他のユーザーの処理が長引いているため、今回の編集は反映されませんでした。時間をおいて再度お試しください。');
     return;
   }
   
@@ -69,15 +91,12 @@ function onEdit(e) {
     if (sheetName === CONFIG.SHEETS.MAIN) {
       const mainSheet = new MainSheet();
       const editedCol = e.range.getColumn();
-      // ★★★ここからが改善ロジック★★★
-      // 担当者列が編集された場合も同期をトリガーする
       if (editedCol === mainSheet.indices.TANTOUSHA) {
         ss.toast('担当者の変更を検出しました。関連シートを同期します...', '同期中', 5);
         syncMainToAllInputSheets();
         colorizeAllSheets();
         ss.toast('同期処理が完了しました。', '完了', 3);
       } else {
-        // それ以外のメインシートの編集は、従来通り色付けのみ行う
          colorizeAllSheets();
       }
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
@@ -90,14 +109,31 @@ function onEdit(e) {
     Logger.log(error.stack);
     ss.toast(`エラーが発生しました: ${error.message}`, "エラー", 10);
   } finally {
+    // 処理が終わったら、必ず鍵を解放する
     lock.releaseLock();
   }
 }
 
-function runColorizeAllSheets() {
-  SpreadsheetApp.getActiveSpreadsheet().toast('重複チェックと色付けを実行中...', '処理中', 5);
+// =================================================================================
+// === メンテナンス用関数 ===
+// =================================================================================
+
+/**
+ * 定期実行（毎時）で呼び出される関数
+ */
+function periodicMaintenance() {
+  setupAllDataValidations();
+}
+
+/**
+ * 手動実行用の統合関数
+ */
+function runAllManualMaintenance() {
+  SpreadsheetApp.getActiveSpreadsheet().toast('各種設定と書式を適用中...', '処理中', 3);
+  setupAllDataValidations();
   colorizeAllSheets();
-  SpreadsheetApp.getActiveSpreadsheet().toast('処理が完了しました。', '完了', 3);
+  applyStandardFormattingToMainSheet();
+  SpreadsheetApp.getActiveSpreadsheet().toast('適用が完了しました。', '完了', 3);
 }
 
 // =================================================================================
@@ -113,46 +149,14 @@ function applyStandardFormattingToMainSheet() {
       const headerRange = sheet.getRange(1, 1, 1, sheet.getMaxColumns());
       headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND);
       headerRange.setFontColor('#ffffff');
-      // 文字色を白に
       headerRange.setFontWeight('bold');
       
       sheet.setFrozenRows(1);
       sheet.setFrozenColumns(4);
-      // D列までを固定
     }
   } catch(e) {
     Logger.log(`メインシートの標準フォーマット適用中にエラー: ${e.message}`);
   }
-}
-
-// =================================================================================
-// === 工数シート表示切替機能 ===
-// =================================================================================
-function showAllDateColumns() {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  if (!sheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-    SpreadsheetApp.getUi().alert('この機能は工数シートでのみ利用できます。');
-    return;
-  }
-  
-  const lastCol = sheet.getLastColumn();
-  const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
-  if (lastCol >= dateStartCol) {
-    sheet.showColumns(dateStartCol, lastCol - dateStartCol + 1);
-    SpreadsheetApp.getActiveSpreadsheet().toast('すべての日付列を表示しました。');
-  }
-}
-
-function hideOldDateColumns() {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    if (!sheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-      SpreadsheetApp.getUi().alert('この機能は工数シートでのみ利用できます。');
-      return;
-    }
-    const tantoushaName = sheet.getName().replace(CONFIG.SHEETS.INPUT_PREFIX, '');
-    const inputSheet = new InputSheet(tantoushaName);
-    inputSheet.filterDateColumns();
-    SpreadsheetApp.getActiveSpreadsheet().toast('表示を当月・前月に戻しました。');
 }
 
 
@@ -281,9 +285,7 @@ function setupAllDataValidations() {
             const lastRow = sheet.getMaxRows();
             const progressCol = inputSheet.indices.PROGRESS;
 
-            if(progressCol && lastRow >= inputSheet.startRow) 
-            {
- 
+            if(progressCol && lastRow >= inputSheet.startRow) {
               sheet.getRange(inputSheet.startRow, progressCol, lastRow - inputSheet.startRow + 1).setDataValidation(progressRule);
             }
           } catch(e) {
@@ -319,7 +321,6 @@ function colorizeAllSheets() {
         } catch (e) { /* エラーは無視 */ }
       } else if (sheetName.startsWith('View_')) {
         try {
-     
           const viewSheetObj = {
             getSheet: () => sheet,
             indices: getColumnIndices(sheet, MAIN_SHEET_HEADERS),
@@ -328,7 +329,6 @@ function colorizeAllSheets() {
           };
           colorizeSheet_(viewSheetObj);
         } catch (e) {
-    
           Logger.log(`Viewシート ${sheetName} の色付けエラー: ${e.message}`);
         }
       }
@@ -353,14 +353,11 @@ function colorizeSheet_(sheetObject) {
   const lastCol = sheet.getLastColumn();
   const fullRange = sheet.getRange(startRow, 1, dataRows, lastCol);
 
-  // ▼▼▼ 修正箇所 START: リンクが消えないように修正 ▼▼▼
   const values = fullRange.getValues();
   const formulas = fullRange.getFormulas();
-  // 数式を優先して、書き込むための2次元配列を再生成する
   const outputValues = values.map((row, i) => {
     return row.map((cell, j) => formulas[i][j] || cell);
   });
-  // ▲▲▲ 修正箇所 END ▲▲▲
 
   const backgroundColors = fullRange.getBackgrounds();
 
@@ -374,7 +371,7 @@ function colorizeSheet_(sheetObject) {
   const uniqueKeys = new Set();
   const restrictedRanges = [];
   const normalRanges = [];
-  values.forEach((row, i) => { // 注意: 比較には `values` を使う
+  values.forEach((row, i) => {
     let isDuplicate = false;
     if (kibanCol && sagyouKubunCol) {
       const kiban = safeTrim(row[kibanCol - 1]);
@@ -384,7 +381,6 @@ function colorizeSheet_(sheetObject) {
         const uniqueKey = `${kiban}_${sagyouKubun}`;
         if (uniqueKeys.has(uniqueKey)) {
           isDuplicate = true;
-      
         } else {
           uniqueKeys.add(uniqueKey);
         }
@@ -411,10 +407,7 @@ function colorizeSheet_(sheetObject) {
 
       if (progressCol) {
         const progressValue = safeTrim(row[progressCol - 1]);
-        const progressColor = (progressValue === "")
-          ?
-          baseColor
-          : getColor(PROGRESS_COLORS, progressValue, baseColor);
+        const progressColor = (progressValue === "") ? baseColor : getColor(PROGRESS_COLORS, progressValue, baseColor);
         
         backgroundColors[i][progressCol - 1] = progressColor;
         if (mgmtNoCol && (sheetObject instanceof MainSheet || sheetObject instanceof InputSheet || sheet.getName().startsWith('View_'))) {
@@ -449,9 +442,8 @@ function colorizeSheet_(sheetObject) {
     }
   });
 
-  fullRange.setValues(outputValues); // 値と数式を書き戻す
+  fullRange.setValues(outputValues);
   fullRange.setBackgrounds(backgroundColors);
-  // 色を書き戻す
 
   if (sheetObject instanceof MainSheet) {
     if (restrictedRanges.length > 0) {
