@@ -11,7 +11,7 @@ function onOpen(e) {
   const ui = SpreadsheetApp.getUi();
   const menu = ui.createMenu('カスタムメニュー');
   // ▼▼▼ この1行を追加 ▼▼▼
-  menu.addItem('【診断】フォルダ作成のチェック', 'checkSheetSetupForFolderCreation');
+  menu.addItem('【診断】フォルダ作成のチェック', 'advancedFolderCreationCheck');
   // ▲▲▲ この1行を追加 ▲▲
   const activeSheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   
@@ -418,56 +418,78 @@ function colorizeSheet_(sheetObject) {
 }
 
 /**
- * 【診断用】シートの状態をチェックして、問題を報告する関数です。
- * 確認後、この関数は削除しても問題ありません。
+ * 【最終診断用】シートのデータ内容を詳細にログ出力する関数です。
+ * これを実行した後、ログを確認してください。
  */
-function checkSheetSetupForFolderCreation() {
+function advancedFolderCreationCheck() {
   const ui = SpreadsheetApp.getUi();
+  // ログ出力の開始を宣言
+  Logger.log("========= 最終診断を開始します =========");
   try {
     const mainSheet = new MainSheet();
     const sheet = mainSheet.getSheet();
     const startRow = mainSheet.startRow;
+    const lastRow = sheet.getLastRow();
 
-    // 1. データ行の存在チェック
-    if (sheet.getLastRow() < startRow) {
-      ui.alert('【診断結果】\n\nデータが1行も入力されていません。\n\n2行目以降に案件データを入力してください。');
+    // データ行の存在チェック
+    if (lastRow < startRow) {
+      Logger.log("診断終了: データが1行も入力されていません。");
+      ui.alert('【診断結果】データが1行も入力されていません。');
       return;
     }
 
-    // 2. 必須列の存在と名前のチェック
-    const requiredHeaders = {
-      '機番': 'KIBAN',
-      '機番(リンク)': 'KIBAN_URL',
-      '機種': 'MODEL',
-      'STD資料(リンク)': 'SERIES_URL'
-    };
-    const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    for (const headerName in requiredHeaders) {
-      if (headerRow.indexOf(headerName) === -1) {
-        ui.alert(`【診断結果】\n\nヘッダー列「${headerName}」が見つかりません。\n\n1行目の列名が完全に一致しているか、括弧が半角「()」になっているか確認してください。`);
-        return;
-      }
+    const indices = mainSheet.indices;
+    // 必須列のインデックスが正しく取得できているか確認
+    if (!indices.KIBAN || !indices.KIBAN_URL || !indices.MODEL || !indices.SERIES_URL) {
+       Logger.log("診断終了: 必須の列（機番、機番(リンク)、機種、STD資料(リンク)）が見つかりません。ヘッダー名が正しいか確認してください。");
+       ui.alert("【診断結果】必須の列が見つかりません。ヘッダー名を確認してください。");
+       return;
     }
 
-    // 3. データ内容のチェック
-    const indices = mainSheet.indices;
-    const values = sheet.getRange(startRow, 1, 5, sheet.getLastColumn()).getValues(); // 先頭5行をチェック
-    let hasKibanValue = false;
-    let hasModelValue = false;
-    values.forEach(row => {
-      if (row[indices.KIBAN - 1]) hasKibanValue = true;
-      if (row[indices.MODEL - 1]) hasModelValue = true;
+    // 処理負荷を考慮し、チェックする行数を最大20行に制限
+    const numRowsToCheck = Math.min(20, lastRow - startRow + 1);
+    const range = sheet.getRange(startRow, 1, numRowsToCheck, sheet.getLastColumn());
+    const values = range.getDisplayValues(); // セルに表示されている値を取得
+    const formulas = range.getFormulas();     // セルに設定されている数式を取得
+
+    Logger.log(`先頭 ${numRowsToCheck} 行のデータ内容をチェックします...`);
+
+    let linkCellIsNotEmpty = false;
+    values.forEach((row, i) => {
+      const currentRowNum = startRow + i;
+      const kibanValue = row[indices.KIBAN - 1];
+      const modelValue = row[indices.MODEL - 1];
+      const kibanLinkCellDisplayValue = row[indices.KIBAN_URL - 1];
+      const stdLinkCellDisplayValue = row[indices.SERIES_URL - 1];
+      const kibanLinkCellFormula = formulas[i][indices.KIBAN_URL - 1];
+      const stdLinkCellFormula = formulas[i][indices.SERIES_URL - 1];
+
+      // ログに各セルの詳細情報を記録
+      Logger.log(`--- ${currentRowNum}行目のチェック ---`);
+      Logger.log(`  機番: 「${kibanValue}」`);
+      Logger.log(`  機種: 「${modelValue}」`);
+      Logger.log(`  機番(リンク)セルの表示値: 「${kibanLinkCellDisplayValue}」 (文字数: ${kibanLinkCellDisplayValue.length})`);
+      Logger.log(`  機番(リンク)セルの数式: 「${kibanLinkCellFormula}」`);
+      Logger.log(`  STD資料(リンク)セルの表示値: 「${stdLinkCellDisplayValue}」 (文字数: ${stdLinkCellDisplayValue.length})`);
+      Logger.log(`  STD資料(リンク)セルの数式: 「${stdLinkCellFormula}」`);
+      
+      // リンク先セルが空でない場合を検出
+      if (kibanLinkCellDisplayValue.length > 0 || stdLinkCellDisplayValue.length > 0) {
+        linkCellIsNotEmpty = true;
+      }
     });
 
-    if (!hasKibanValue && !hasModelValue) {
-      ui.alert('【診断結果】\n\n「機番」と「機種」の列にデータが入力されていません。\n\nフォルダを作成するには、これらの列に値が必要です。');
-      return;
+    Logger.log("========= 診断を完了しました =========");
+
+    // ユーザーへのフィードバック
+    if (linkCellIsNotEmpty) {
+        ui.alert('【診断完了】\n\nリンク先のセルに何らかのデータ（スペース等）が含まれている可能性があります。\n\n詳細なログが出力されましたので、次の手順に進んでください。');
+    } else {
+        ui.alert('【診断完了】\n\nリンク先のセルは空のようです。\n\n詳細なログが出力されましたので、次の手順に進んでください。');
     }
 
-    ui.alert('【診断結果】\n\nシートの基本的な設定は問題ないようです。\n\nもしこれでもリンクが作成されない場合、Google Driveのフォルダ権限に問題がある可能性があります。');
-
   } catch (e) {
-    Logger.log(e.stack);
+    Logger.log(`診断中にエラーが発生しました: ${e.stack}`);
     ui.alert(`診断中にエラーが発生しました: ${e.message}`);
   }
 }
