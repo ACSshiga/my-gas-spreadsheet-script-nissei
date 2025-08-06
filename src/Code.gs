@@ -104,12 +104,10 @@ function applyStandardFormattingToAllSheets() {
   ss.toast('フォントとサイズを整形中...', '処理中');
   
   allSheets.forEach(sheet => {
-    // ★★★ここからが改善箇所★★★
     // 工数シートは書式設定の対象外にする
     if (sheet.getName().startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
       return;
     }
-    // ★★★ここまでが改善箇所★★★
     try {
       const dataRange = sheet.getDataRange();
       if (dataRange.isBlank()) return;
@@ -289,15 +287,12 @@ function colorizeAllSheets() {
 
     allSheets.forEach(sheet => {
       const sheetName = sheet.getName();
-      
-      // 工数シートは色付け処理の対象外にする
-      if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-        return; // 次のシートへ
-      }
-
       try {
         if (sheetName === CONFIG.SHEETS.MAIN) {
           colorizeSheet_(new MainSheet());
+        } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+          const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
+          colorizeSheet_(new InputSheet(tantoushaName));
         } else if (sheetName.startsWith('View_')) {
           const viewSheetObj = {
             getSheet: () => sheet,
@@ -311,7 +306,7 @@ function colorizeAllSheets() {
         Logger.log(`シート「${sheetName}」の色付け処理中にエラー: ${e.message}`);
       }
     });
-    logWithTimestamp("メインシートとViewシートの色付け処理が完了しました。");
+    logWithTimestamp("全シートの色付け処理が完了しました。");
   } catch (error) {
     Logger.log(`色付け処理でエラーが発生しました: ${error.stack}`);
   }
