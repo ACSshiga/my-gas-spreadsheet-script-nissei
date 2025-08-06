@@ -4,8 +4,10 @@
  */
 const CONFIG = {
   FOLDERS: {
-    REFERENCE_MATERIAL_PARENT: "1FVzgvod5z9jdbI0yrQo8G8cH0Bv1a1pn",
-    SERIES_MODEL_PARENT:       "1Qol5fRzYxvEfzo9BkNVmjnGELrkgvVel",
+    // ▼▼▼ この2行を修正 ▼▼▼
+    REFERENCE_MATERIAL_PARENT: "1XdiYBWiixF_zOSScT7UKUhCQkye3MLNJ", // 機番フォルダの親フォルダID
+    SERIES_MODEL_PARENT:       "124OR71hkr2jeT-5esv0GHAeZn83fAvYc", // STD資料フォルダの親フォルダID
+    // ▲▲▲ この2行を修正 ▲▲▲
     BACKUP_PARENT:             "1OKyXDvCMDiAsvcZXac2BjuJDk5x1-JyO",
     // ★★★ フォルダIDを反映しました ★★★
     IMPORT_SOURCE_FOLDER: "16RqfEDRYnoq09Xu2mmM3e8wQbqulOh56", // 申請書インポート用
