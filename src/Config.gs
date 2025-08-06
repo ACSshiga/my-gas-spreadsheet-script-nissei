@@ -21,10 +21,8 @@ const CONFIG = {
   },
   COLORS: {
     DEFAULT_BACKGROUND: '#ffffff',
-    ALTERNATE_ROW:      '#f9f9f9', // 交互の背景色用の薄いグレー
-    // ▼▼▼ この1行を追加 ▼▼▼
+    ALTERNATE_ROW:      '#f0f5f5', // おしゃれなミントグリーン
     HEADER_BACKGROUND:  '#4f5459', // ヘッダー用の背景色
-    // ▲▲▲ この1行を追加 ▲▲▲
     WEEKEND_HOLIDAY:    '#f2f2f2'
   },
   DATA_START_ROW: {
@@ -37,6 +35,7 @@ const CONFIG = {
   },
   HOLIDAY_CALENDAR_ID: 'ja.japanese#holiday@group.v.calendar.google.com',
 };
+
 const MAIN_SHEET_HEADERS = {
   MGMT_NO: "管理No", SAGYOU_KUBUN: "作業区分", KIBAN: "機番", MODEL: "機種",
   KIBAN_URL: "機番(リンク)", SERIES_URL: "STD資料(リンク)", REFERENCE_KIBAN: "参考製番",
@@ -46,10 +45,12 @@ const MAIN_SHEET_HEADERS = {
   COMPLETE_DATE: "完了日", DRAWING_DEADLINE: "作図期限", PROGRESS_EDITOR: "進捗記入者",
   UPDATE_TS: "更新日時", OVERRUN_REASON: "係り超過理由", NOTES: "注意点", REMARKS: "備考"
 };
+
 const INPUT_SHEET_HEADERS = {
   MGMT_NO: "管理No", SAGYOU_KUBUN: "作業区分", KIBAN: "機番", PROGRESS: "進捗",
   PLANNED_HOURS:"予定工数", ACTUAL_HOURS_SUM: "実績工数合計", SEPARATOR: "",
 };
+
 function getColumnIndices(sheet, headerDef) {
   const cache = CacheService.getScriptCache();
   const cacheKey = `col_indices_${sheet.getSheetId()}`;

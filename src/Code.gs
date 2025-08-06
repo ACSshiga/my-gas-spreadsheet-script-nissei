@@ -1,6 +1,6 @@
 /**
  * Code.gs
- * イベントハンドラとカスタムメニューを管理する司令塔。
+ * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
  */
 
 // =================================================================================
@@ -31,13 +31,11 @@ function onOpen(e) {
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
 
-  // ★★★ここからが改善箇所★★★
   // onOpenで実行する処理の順番を最適化
   syncMainToAllInputSheets();
   applyStandardFormattingToAllSheets();
   applyStandardFormattingToMainSheet();
   colorizeAllSheets();
-  // ★★★ここまでが改善箇所★★★
 }
 
 /**
@@ -128,18 +126,21 @@ function applyStandardFormattingToAllSheets() {
       const lastCol = sheet.getLastColumn();
       const lastRow = sheet.getLastRow();
 
+      // 1. 基本書式（フォント、サイズ、配置、罫線）を適用
       dataRange
         .setFontFamily("Arial")
         .setFontSize(12)
         .setVerticalAlignment("middle")
         .setBorder(true, true, true, true, true, true, "#cccccc", SpreadsheetApp.BorderStyle.SOLID);
 
+      // 2. ヘッダーを中央揃え
       const headerRange = sheet.getRange(1, 1, 1, lastCol);
       headerRange.setHorizontalAlignment("center");
 
+      // 3. 数字の列を右揃え
       const sheetName = sheet.getName();
       let indices;
-      if (sheetName === CONFIG.SHEETS.MAIN) {
+      if (sheetName === CONFIG.SHEETS.MAIN || sheetName.startsWith('View_')) {
         indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
         const numberCols = [indices.PLANNED_HOURS, indices.ACTUAL_HOURS];
         numberCols.forEach(colIndex => {
@@ -156,7 +157,7 @@ function applyStandardFormattingToAllSheets() {
           }
         });
         if (indices.SEPARATOR) {
-           const dateColStart = indices.SEPARATOR + 1;
+           const dateColStart = indices.SEPARATOR + 2; // 日付入力開始列
            if (lastCol >= dateColStart && lastRow > 2) {
              sheet.getRange(3, dateColStart, lastRow - 2, lastCol - dateColStart + 1).setHorizontalAlignment("right");
            }
@@ -172,23 +173,27 @@ function applyStandardFormattingToAllSheets() {
 
 
 /**
- * メインシートにヘッダーの色付けとウィンドウ枠の固定を適用します。
+ * メインシートとViewシートにヘッダーの色付けとウィンドウ枠の固定を適用します。
  */
 function applyStandardFormattingToMainSheet() {
-  try {
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.SHEETS.MAIN);
-    if (sheet) {
-      const headerRange = sheet.getRange(1, 1, 1, sheet.getMaxColumns());
-      headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND)
-                 .setFontColor('#ffffff')
-                 .setFontWeight('bold');
-      
-      sheet.setFrozenRows(1);
-      sheet.setFrozenColumns(4);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetsToFormat = [ss.getSheetByName(CONFIG.SHEETS.MAIN), ss.getActiveSheet()];
+  
+  sheetsToFormat.forEach(sheet => {
+    if (sheet && (sheet.getName() === CONFIG.SHEETS.MAIN || sheet.getName().startsWith('View_'))) {
+      try {
+        const headerRange = sheet.getRange(1, 1, 1, sheet.getMaxColumns());
+        headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND)
+                   .setFontColor('#ffffff')
+                   .setFontWeight('bold');
+        
+        sheet.setFrozenRows(1);
+        sheet.setFrozenColumns(4);
+      } catch(e) {
+        Logger.log(`シート「${sheet.getName()}」のヘッダー書式設定中にエラー: ${e.message}`);
+      }
     }
-  } catch(e) {
-    Logger.log(`メインシートの標準フォーマット適用中にエラー: ${e.message}`);
-  }
+  });
 }
 
 
@@ -212,16 +217,26 @@ function createPersonalView() {
 
   const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
   const mainIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
-  const mainData = mainSheet.getDataRange().getValues();
   
-  const headers = mainData[0];
-  const personalData = mainData.filter((row, index) => {
-    return index === 0 || row[mainIndices.TANTOUSHA - 1] === tantoushaName;
+  const mainDataRange = mainSheet.getDataRange();
+  const mainValues = mainDataRange.getValues();
+  const mainFormulas = mainDataRange.getFormulas();
+  
+  const headers = mainFormulas[0]; // ヘッダー行は数式ごと取得
+  const personalData = [headers];
+
+  mainValues.forEach((row, index) => {
+    if (index > 0 && row[mainIndices.TANTOUSHA - 1] === tantoushaName) {
+      const rowData = row.map((cell, colIndex) => mainFormulas[index][colIndex] || cell);
+      personalData.push(rowData);
+    }
   });
+
   removePersonalView(false);
 
   const viewSheetName = `View_${tantoushaName}`;
   const viewSheet = ss.insertSheet(viewSheetName, 0);
+  
   viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
   
   applyStandardFormattingToAllSheets();

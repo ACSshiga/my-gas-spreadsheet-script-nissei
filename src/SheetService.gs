@@ -91,7 +91,9 @@ class InputSheet extends SheetService {
     }
     
     if (data.length === 0) return;
-    this.sheet.getRange(this.startRow, 1, data.length, data[0].length).setValues(data);
+    
+    const dataRange = this.sheet.getRange(this.startRow, 1, data.length, data[0].length);
+    dataRange.setValues(data);
 
     const sumFormulas = [];
     const dateStartCol = Object.keys(INPUT_SHEET_HEADERS).length + 1;
@@ -101,13 +103,15 @@ class InputSheet extends SheetService {
       sumFormulas.push([`=IFERROR(SUM(${dateStartColLetter}${rowNum}:${rowNum}))`]);
     }
     this.sheet.getRange(this.startRow, this.indices.ACTUAL_HOURS_SUM, data.length, 1).setFormulas(sumFormulas);
+
+    // データ書き込み後に、ヘッダーを含めてフィルターを再作成する
+    this.sheet.getRange(this.startRow - 1, 1, data.length + 1, this.getLastColumn()).createFilter();
   }
   
   getDataMapForProgress() {
     const lastRow = this.getLastRow();
     if (lastRow < this.startRow) return new Map();
     
-    // 進捗列までのデータだけを効率的に取得
     const lastColToRead = Math.max(this.indices.MGMT_NO, this.indices.SAGYOU_KUBUN, this.indices.PROGRESS);
     const values = this.sheet.getRange(this.startRow, 1, lastRow - this.startRow + 1, lastColToRead).getValues();
     
