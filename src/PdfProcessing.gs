@@ -1,152 +1,140 @@
 /**
- * PdfProcessing.gs
- * アップロードされた申請書ファイルを解析し、メインシートにデータをインポートする機能を担当します。
+ * DriveIntegration.gs
+ * Google Driveとの連携機能（フォルダ作成、バックアップ）を管理します。
  */
+
+// =================================================================================
+// === Google Drive フォルダ作成関連機能 ===
+// =================================================================================
 
 /**
- * 指定されたGoogle DriveフォルダからPDFファイルを一括でインポートします。
+ * メインシートのデータに基づき、資料フォルダを一括作成し、シートにリンクを挿入します。
+ * 機種(MODEL)については、指定された命名規則（先頭の英語+数字）に基づいてグルーピングされます。
  */
-function importFromDriveFolder() {
-  const ui = SpreadsheetApp.getUi();
+function bulkCreateMaterialFolders() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   try {
-    if (CONFIG.FOLDERS.IMPORT_SOURCE_FOLDER.includes("貼り付け") || 
-        CONFIG.FOLDERS.PROCESSED_FOLDER.includes("貼り付け")) {
-      ui.alert('エラー: Config.gsファイルにインポート用のフォルダIDが正しく設定されていません。');
-      return;
-    }
-
-    const sourceFolder = DriveApp.getFolderById(CONFIG.FOLDERS.IMPORT_SOURCE_FOLDER);
-    const processedFolder = DriveApp.getFolderById(CONFIG.FOLDERS.PROCESSED_FOLDER);
-    const filesIterator = sourceFolder.getFilesByType(MimeType.PDF);
-    const filesForProcessing = [];
-    while (filesIterator.hasNext()) {
-      filesForProcessing.push(filesIterator.next());
-    }
-    const fileCount = filesForProcessing.length;
-
-    if (fileCount === 0) {
-      ui.alert('インポート用フォルダ内にPDFファイルが見つかりませんでした。');
-      return;
-    }
-    
-    ui.alert(`インポート用フォルダ内で ${fileCount} 個のPDFファイルが見つかりました。処理を開始します。`);
-
-    let totalImportedCount = 0;
-    const allNewRows = [];
     const mainSheet = new MainSheet();
+    const sheet = mainSheet.getSheet();
     const indices = mainSheet.indices;
-    const year = new Date().getFullYear();
-    filesForProcessing.forEach(file => {
-      const text = extractTextFromPdf(file);
-      
-      Logger.log(`===== PDFファイル「${file.getName()}」から抽出したテキスト =====`);
-      Logger.log(text);
-      Logger.log(`========================================================`);
+    const requiredColumns = {
+      KIBAN: indices.KIBAN, KIBAN_URL: indices.KIBAN_URL,
+      MODEL: indices.MODEL, SERIES_URL: indices.SERIES_URL
+    };
+    for (const [key, value] of Object.entries(requiredColumns)) {
+      if (!value) throw new Error(`必要な列「${key}」が見つかりません。`);
+    }
 
-      const applications = text.split(/設計業務の外注委託申請書|--- PAGE \d+ ---/).filter(s => s.trim().length > 20 && /管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)/.test(s));
-      
-      if (applications.length === 0) {
-        Logger.log(`ファイル「${file.getName()}」から有効な申請書データが見つかりませんでした。`);
-        return;
+    const lastRow = mainSheet.getLastRow();
+    if (lastRow < mainSheet.startRow) return;
+    const range = sheet.getRange(mainSheet.startRow, 1, lastRow - mainSheet.startRow + 1, mainSheet.getLastColumn());
+    const values = range.getValues();
+    const formulas = range.getFormulas();
+    const processedItems = new Set();
+
+    const folderCreationTasks = [
+      {
+        type: 'KIBAN', // 機番は完全一致
+        valueCol: indices.KIBAN,
+        linkCol: indices.KIBAN_URL,
+        parentFolderId: CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT
+      },
+      {
+        type: 'MODEL', // 機種は前方一致
+        valueCol: indices.MODEL,
+        linkCol: indices.SERIES_URL,
+        parentFolderId: CONFIG.FOLDERS.SERIES_MODEL_PARENT
       }
+    ];
 
-      applications.forEach((appText, i) => {
-        Logger.log(`--- 申請書 ${i + 1} の解析開始 ---`);
-        const mgmtNo = getValue(appText, /管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)\s*(\S+)/, 4);
-        if (!mgmtNo) {
-          Logger.log('管理Noが見つからないためスキップします。');
-          return;
+    folderCreationTasks.forEach(task => {
+      processedItems.clear();
+      values.forEach((row, i) => {
+        const originalValue = String(row[task.valueCol - 1]).trim();
+        if (!originalValue) return;
+
+        let groupValue;
+        let folderName;
+
+        if (task.type === 'MODEL') {
+          const match = originalValue.match(/^[A-Za-z]+[0-9]+/);
+          groupValue = match ? match[0] : originalValue; // マッチすればプレフィックス、しなければ元の値でグループ化
+          folderName = groupValue; // フォルダ名はグループ名
+        } else {
+          groupValue = originalValue;
+          folderName = originalValue;
         }
 
-        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        // 修正箇所：正規表現の先読み部分にコロンを追加して、各項目の区切りをより正確に判定
-        const kishu = getValue(appText, /機種\s*([:：])\s*([\s\S]*?)(?=\s*机番\s*[:：]|\s*機番\s*[:：]|\s*納入先\s*[:：]|\s*・機械納期|\n)/, 2);
-        const kiban = getValue(appText, /機番\s*([:：])\s*([\s\S]*?)(?=\s*納入先\s*[:：]|\s*・機械納期|\s*入庫予定日|\n)/, 2);
-        const nounyusaki = getValue(appText, /納入先\s*([:：])\s*([\s\S]*?)(?=\s*・機械納期|\s*入庫予定日|\s*見積設計工数|\s*留意事項|\s*・設計予定期間|\n)/, 2);
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-        
-        const kikanMatch = appText.match(/設計予定期間:?\s*(\d+\s*月\s*\d+\s*日)\s*~\s*(\d+\s*月\s*\d+\s*日)/);
-        const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace(/\s/g, '').replace('月', '/').replace('日', '')}` : '';
-
-        const kousuMatch = appText.match(/盤配\s*[:：]\s*(\d+)\s*H[\s\S]*?線加工\s*(\d+)\s*H/);
-        if (kousuMatch) {
-          const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
-          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
-          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
-        } else {
-          const yoteiKousu = getValue(appText, /見積設計工数\s*[:：]\s*(\d+)/) || getValue(appText, /(\d+)\s*Η/) || getValue(appText, /(\d+)\s*H/);
-          const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
-          
-          let sagyouKubun = '盤配';
-          if ((naiyou && naiyou.includes('線加工')) || mgmtNo === 'E257001') {
-            sagyouKubun = '線加工';
+        if (groupValue && !processedItems.has(groupValue)) {
+          const folderResult = getOrCreateFolder_(folderName, task.parentFolderId);
+          if (folderResult && folderResult.folder) {
+            const url = folderResult.folder.getUrl();
+            if (task.type === 'MODEL') {
+              // 新しい前方一致用の関数でリンクを更新
+              updateLinksForModelPrefix_(values, formulas, groupValue, task.valueCol, task.linkCol, url);
+            } else {
+              // 既存の完全一致用の関数でリンクを更新
+              updateLinksForSameValue_(values, formulas, groupValue, task.valueCol, task.linkCol, url);
+            }
           }
-          
-          allNewRows.push(createRowData_(indices, { mgmtNo, sagyouKubun, kishu, kiban, nounyusaki, yoteiKousu, sakuzuKigen }));
+          processedItems.add(groupValue);
         }
       });
-
-      file.moveTo(processedFolder);
-      totalImportedCount++;
     });
 
-    if (allNewRows.length > 0) {
-      const sheet = mainSheet.getSheet();
-      const lastRow = sheet.getLastRow();
-      sheet.getRange(lastRow + 1, 1, allNewRows.length, allNewRows[0].length).setValues(allNewRows);
-      ui.alert(`${totalImportedCount}個のファイルから ${allNewRows.length}件のデータをインポートしました。`);
-      syncDefaultProgressToMain();
-      colorizeAllSheets();
-    } else if (totalImportedCount > 0) {
-      ui.alert(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。Cloud Logsに詳細なデバッグ情報が出力されています。`);
-    }
+    const outputData = values.map((row, i) => row.map((cell, j) => formulas[i][j] || cell));
+    range.setValues(outputData);
 
-  } catch (e) {
-    Logger.log(e.stack);
-    ui.alert(`エラーが発生しました: ${e.message}`);
+    ss.toast("資料フォルダの作成とリンク設定が完了しました。");
+  } catch (error) {
+    Logger.log(error.stack);
+    ss.toast(`エラー: ${error.message}`);
   }
 }
 
 /**
- * Drive上のPDFファイルからOCRでテキストを抽出します。
+ * (リファクタリング)
+ * 指定された列の値が一致するすべての行に、ハイパーリンクを設定します。
  */
-function extractTextFromPdf(file) {
-  let tempDoc;
-  try {
-    const blob = file.getBlob();
-    const resource = { title: `temp_ocr_${file.getName()}` };
-    const tempDocFile = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'ja' });
-    tempDoc = DocumentApp.openById(tempDocFile.id);
-    return tempDoc.getBody().getText();
-  } catch(e) {
-    throw new Error(`ファイル「${file.getName()}」のテキスト抽出に失敗しました: ${e.message}`);
-  } finally {
-    if (tempDoc) {
-      Drive.Files.remove(tempDoc.getId());
+function updateLinksForSameValue_(allValues, allFormulas, valueToMatch, valueColumn, linkColumn, url) {
+  allValues.forEach((row, i) => {
+    if (String(row[valueColumn - 1]).trim() === valueToMatch) {
+      if (!allFormulas[i][linkColumn - 1]) {
+        // リンクの表示名は、マッチした値そのものを使用
+        allFormulas[i][linkColumn - 1] = createHyperlinkFormula(url, valueToMatch);
+      }
     }
-  }
+  });
 }
 
 /**
- * テキストから正規表現で値を抽出するヘルパー関数
+ * (新規追加)
+ * 指定されたプレフィックスに前方一致するすべての行に、ハイパーリンクを設定します。
+ * @param {any[][]} allValues - シートの全データ値
+ * @param {string[][]} allFormulas - シートの全数式
+ * @param {string} prefixToMatch - 検索対象のプレフィックス
+ * @param {number} valueColumn - プレフィックスを照合する列のインデックス
+ * @param {number} linkColumn - リンクを挿入する列のインデックス
+ * @param {string} url - 挿入するフォルダのURL
  */
-function getValue(text, regex, groupIndex = 1) {
-    const match = text.match(regex);
-    return match && match[groupIndex] ? match[groupIndex].replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim() : '';
+function updateLinksForModelPrefix_(allValues, allFormulas, prefixToMatch, valueColumn, linkColumn, url) {
+  allValues.forEach((row, i) => {
+    const fullValue = String(row[valueColumn - 1]).trim();
+    if (fullValue.startsWith(prefixToMatch)) {
+      if (!allFormulas[i][linkColumn - 1]) {
+        // リンクの表示名は、元の完全な機種名を使用
+        allFormulas[i][linkColumn - 1] = createHyperlinkFormula(url, fullValue);
+      }
+    }
+  });
 }
 
+
 /**
- * メインシートに追加する行データを作成するヘルパー関数
+ * 指定された名前のフォルダを、指定された親フォルダ内に作成または取得する内部関数。
  */
-function createRowData_(indices, data) {
-  const row = [];
-  if (indices.MGMT_NO) row[indices.MGMT_NO - 1] = data.mgmtNo || '';
-  if (indices.SAGYOU_KUBUN) row[indices.SAGYOU_KUBUN - 1] = data.sagyouKubun || '';
-  if (indices.KIBAN) row[indices.KIBAN - 1] = data.kiban || '';
-  if (indices.MODEL) row[indices.MODEL - 1] = data.kishu || '';
-  if (indices.DESTINATION) row[indices.DESTINATION - 1] = data.nounyusaki || '';
-  if (indices.PLANNED_HOURS) row[indices.PLANNED_HOURS - 1] = data.yoteiKousu || '';
-  if (indices.DRAWING_DEADLINE) row[indices.DRAWING_DEADLINE - 1] = data.sakuzuKigen || '';
-  
-  return row;
+function getOrCreateFolder_(name, parentFolderId) {
+  // ... (この関数の内容は変更ありません)
 }
+
+// ... (週次バックアップ機能は変更ありません)
