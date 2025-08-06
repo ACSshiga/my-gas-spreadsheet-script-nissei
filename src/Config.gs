@@ -4,10 +4,8 @@
  */
 const CONFIG = {
   FOLDERS: {
-    // ▼▼▼ ご指示に基づき、IDを入れ替えました ▼▼▼
     REFERENCE_MATERIAL_PARENT: "124OR71hkr2jeT-5esv0GHAeZn83fAvYc", // 機番フォルダの親フォルダID
     SERIES_MODEL_PARENT:       "1XdiYBWiixF_zOSScT7UKUhCQkye3MLNJ", // STD資料フォルダの親フォルダID
-    // ▲▲▲ IDを入れ替えました ▲▲▲
     BACKUP_PARENT:             "1OKyXDvCMDiAsvcZXac2BjuJDk5x1-JyO",
     IMPORT_SOURCE_FOLDER: "16RqfEDRYnoq09Xu2mmM3e8wQbqulOh56", // 申請書インポート用
     PROCESSED_FOLDER:     "1T5W9vYZKoZDtD-6_clPGRUolgqpK4Zgg"  // 処理済み申請書
@@ -35,7 +33,6 @@ const CONFIG = {
   },
   HOLIDAY_CALENDAR_ID: 'ja.japanese#holiday@group.v.calendar.google.com',
 };
-
 const MAIN_SHEET_HEADERS = {
   MGMT_NO: "管理No", SAGYOU_KUBUN: "作業区分", KIBAN: "機番", MODEL: "機種",
   KIBAN_URL: "機番(リンク)", SERIES_URL: "STD資料(リンク)", REFERENCE_KIBAN: "参考製番",
@@ -45,12 +42,10 @@ const MAIN_SHEET_HEADERS = {
   COMPLETE_DATE: "完了日", DRAWING_DEADLINE: "作図期限", PROGRESS_EDITOR: "進捗記入者",
   UPDATE_TS: "更新日時", OVERRUN_REASON: "係り超過理由", NOTES: "注意点", REMARKS: "備考"
 };
-
 const INPUT_SHEET_HEADERS = {
   MGMT_NO: "管理No", SAGYOU_KUBUN: "作業区分", KIBAN: "機番", PROGRESS: "進捗",
   PLANNED_HOURS:"予定工数", ACTUAL_HOURS_SUM: "実績工数合計", SEPARATOR: "",
 };
-
 function getColumnIndices(sheet, headerDef) {
   const cache = CacheService.getScriptCache();
   const cacheKey = `col_indices_${sheet.getSheetId()}`;
