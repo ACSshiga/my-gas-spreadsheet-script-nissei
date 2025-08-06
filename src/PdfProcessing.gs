@@ -46,7 +46,7 @@ function importFromDriveFolder() {
       Logger.log(text);
       Logger.log(`========================================================`);
 
-      const applications = text.split(/設計業務の外注委託申請書|--- PAGE \d+ ---/).filter(s => s.trim().length > 20 && s.includes('管理No.'));
+      const applications = text.split(/設計業務の外注委託申請書|--- PAGE \d+ ---/).filter(s => s.trim().length > 20 && /管理N(o|ｏ|O|Ｏ)\.(|．)/.test(s));
       
       if (applications.length === 0) {
         Logger.log(`ファイル「${file.getName()}」から有効な申請書データが見つかりませんでした。`);
@@ -55,7 +55,7 @@ function importFromDriveFolder() {
 
       applications.forEach((appText, i) => {
         Logger.log(`--- 申請書 ${i + 1} の解析開始 ---`);
-        const mgmtNo = getValue(appText, /管理No\.\s*(\S+)/);
+        const mgmtNo = getValue(appText, /管理N(o|ｏ|O|Ｏ)\.(|．)\s*(\S+)/, 3);
         if (!mgmtNo) {
           Logger.log('管理Noが見つからないためスキップします。');
           return;
@@ -131,9 +131,9 @@ function extractTextFromPdf(file) {
 /**
  * テキストから正規表現で値を抽出するヘルパー関数
  */
-function getValue(text, regex) {
-  const match = text.match(regex);
-  return match && match[1] ? match[1].replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim() : '';
+function getValue(text, regex, groupIndex = 1) {
+    const match = text.match(regex);
+    return match && match[groupIndex] ? match[groupIndex].replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim() : '';
 }
 
 /**
@@ -141,7 +141,6 @@ function getValue(text, regex) {
  */
 function createRowData_(indices, data) {
   const row = [];
-  // 念のため、indicesに必要なキーが存在するかチェック
   if (indices.MGMT_NO) row[indices.MGMT_NO - 1] = data.mgmtNo || '';
   if (indices.SAGYOU_KUBUN) row[indices.SAGYOU_KUBUN - 1] = data.sagyouKubun || '';
   if (indices.KIBAN) row[indices.KIBAN - 1] = data.kiban || '';
