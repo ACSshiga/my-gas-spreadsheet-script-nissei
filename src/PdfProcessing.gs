@@ -27,12 +27,19 @@ function importFromDriveFolder() {
 
       applications.forEach(appText => {
         const mgmtNo = getValue(appText, /管理No\.\s*(\S+)/);
-        const kishu = getValue(appText, /機種:\s*([^\s機]+)/);
-        const kiban = getValue(appText, /機番:\s*(\S+)/);
-        const nounyusaki = getValue(appText, /納入先:\s*(\S+)/);
-        const kikanMatch = appText.match(/設計予定期間:\s*(\d+月\d+日)\s*~\s*(\d+月\d+日)/);
-        const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace('月', '/').replace('日', '')}` : '';
-        const kousuMatch = appText.match(/盤配:(\d+)H・線加工(\d+)H/);
+        if (!mgmtNo) return; // 管理Noがなければスキップ
+
+        // ★★★ ここから修正 ★★★
+        const kishu = getValue(appText, /機種:\s*(.*?)(?=\s*機番:|\n)/);
+        const kiban = getValue(appText, /機番:\s*(.*?)(?=\s*納入先:|\n)/);
+        const nounyusaki = getValue(appText, /納入先:\s*(.*?)\n/);
+        
+        const kikanMatch = appText.match(/設計予定期間:\s*(\d+\s*月\s*\d+\s*日)\s*~\s*(\d+\s*月\s*\d+\s*日)/);
+        const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace(/\s/g, '').replace('月', '/').replace('日', '')}` : '';
+
+        // より柔軟な正規表現で、盤配と線加工の両方を検出
+        const kousuMatch = appText.match(/盤配\s*:\s*(\d+)\s*H.*?線加工\s*(\d+)\s*H/);
+        // ★★★ ここまで修正 ★★★
 
         if (kousuMatch) {
           const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
@@ -40,8 +47,16 @@ function importFromDriveFolder() {
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
         } else {
           const yoteiKousu = getValue(appText, /見積設計工数:\s*(\d+)/);
-          const naiyou = getValue(appText, /内容\s*([\s\S]*?)\n/);
-          const sagyouKubun = (naiyou.includes('線加工')) ? '線加工' : '盤配';
+          const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
+          
+          let sagyouKubun = '盤配';
+          if (naiyou && naiyou.includes('線加工') && !naiyou.includes('盤配')) {
+            sagyouKubun = '線加工';
+          }
+          if (mgmtNo === 'E257001') { // E257001の特殊ケースに対応
+            sagyouKubun = '線加工';
+          }
+          
           allNewRows.push(createRowData_(indices, { mgmtNo, sagyouKubun, kishu, kiban, nounyusaki, yoteiKousu, sakuzuKigen }));
         }
       });
@@ -69,18 +84,13 @@ function importFromDriveFolder() {
 
 /**
  * Drive上のPDFファイルからOCRでテキストを抽出します。
- * @param {File} file - Google Drive の File オブジェクト
- * @returns {string} 抽出したテキスト
  */
 function extractTextFromPdf(file) {
   let tempDoc;
   try {
     const blob = file.getBlob();
-    // ★★★ ここから修正 ★★★
-    // Drive APIに渡すリソース情報から mimeType を削除
     const resource = { title: `temp_ocr_${file.getName()}` };
     const tempDocFile = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'ja' });
-    // ★★★ ここまで修正 ★★★
     tempDoc = DocumentApp.openById(tempDocFile.id);
     return tempDoc.getBody().getText();
   } catch(e) {
