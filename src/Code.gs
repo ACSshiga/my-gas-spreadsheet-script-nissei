@@ -30,11 +30,23 @@ function onOpen(e) {
     .addSeparator()
     .addItem('重複チェックと色付けを再実行', 'runColorizeAllSheets')
     .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
+    .addSeparator()
+    .addItem('申請書からインポート', 'showImportDialog')
     .addToUi();
   
   setupAllDataValidations();
   syncDefaultProgressToMain();
   colorizeAllSheets();
+}
+
+/**
+ * 申請書インポート用のダイアログを表示します。
+ */
+function showImportDialog() {
+  const html = HtmlService.createHtmlOutputFromFile('ImportDialog')
+      .setWidth(400)
+      .setHeight(400);
+  SpreadsheetApp.getUi().showModalDialog(html, '申請書テキストのインポート');
 }
 
 
@@ -49,7 +61,7 @@ function onEdit(e) {
   const ss = e.source;
 
   try {
-    setupAllDataValidations(); // 編集の最初にデータ入力規則を更新
+    setupAllDataValidations(); 
 
     const sheet = e.range.getSheet();
     const sheetName = sheet.getName();
@@ -203,7 +215,7 @@ function setupAllDataValidations() {
       };
       for (const [masterName, colIndex] of Object.entries(mainValidationMap)) {
         if(colIndex) {
-          const masterValues = getMasterData(masterName).map(row => row[0]); // 1列目だけを取得
+          const masterValues = getMasterData(masterName).map(row => row[0]);
           if (masterValues.length > 0) {
             const rule = SpreadsheetApp.newDataValidation().requireValueInList(masterValues).setAllowInvalid(false).build();
             mainSheetObj.getRange(mainSheetInstance.startRow, colIndex, mainLastRow - mainSheetInstance.startRow + 1).setDataValidation(rule);
@@ -215,7 +227,7 @@ function setupAllDataValidations() {
       }
     }
 
-    const progressValues = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER).map(row => row[0]); // 1列目だけを取得
+    const progressValues = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER).map(row => row[0]);
     if (progressValues.length > 0) {
       const progressRule = SpreadsheetApp.newDataValidation().requireValueInList(progressValues).setAllowInvalid(false).build();
       const allSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
