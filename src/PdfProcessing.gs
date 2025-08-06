@@ -4,97 +4,93 @@
  */
 
 /**
- * アップロードされたPDFファイルをテキストに変換し、メインシートに行として追加します。
- * @param {object} fileData クライアントサイドから送られてきたファイル情報
+ * ★★★ 新規追加 ★★★
+ * 指定されたGoogle DriveフォルダからPDFファイルを一括でインポートします。
  */
-function importDataFromPdfFile(fileData) {
-  let tempFile;
+function importFromDriveFolder() {
   try {
-    // 一時的にファイルをGoogle Driveに作成してテキストを抽出
-    const blob = Utilities.newBlob(fileData.bytes, fileData.mimeType, fileData.fileName);
-    tempFile = Drive.Files.insert({ title: 'temp_pdf_import.pdf' }, blob, { ocr: true });
-    const text = DocumentApp.openById(tempFile.id).getBody().getText();
+    const sourceFolder = DriveApp.getFolderById(CONFIG.FOLDERS.IMPORT_SOURCE_FOLDER);
+    const processedFolder = DriveApp.getFolderById(CONFIG.FOLDERS.PROCESSED_FOLDER);
+    const files = sourceFolder.getFilesByType(MimeType.PDF);
+    
+    let totalImportedCount = 0;
+    const allNewRows = [];
+    const mainSheet = new MainSheet();
+    const indices = mainSheet.indices;
+    const year = new Date().getFullYear();
 
-    // テキスト抽出後、メインの処理関数を呼び出す
-    importDataFromText(text);
+    while (files.hasNext()) {
+      const file = files.next();
+      const text = extractTextFromPdf(file);
+      
+      const applications = text.split('設計業務の外注委託申請書').filter(Boolean);
+      if (applications.length === 0) continue;
+
+      applications.forEach(appText => {
+        // (データ抽出ロジックは同じ)
+        const mgmtNo = getValue(appText, /管理No\.\s*(\S+)/);
+        const kishu = getValue(appText, /機種:\s*([^\s機]+)/);
+        const kiban = getValue(appText, /機番:\s*(\S+)/);
+        const nounyusaki = getValue(appText, /納入先:\s*(\S+)/);
+        const kikanMatch = appText.match(/設計予定期間:\s*(\d+月\d+日)\s*~\s*(\d+月\d+日)/);
+        const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace('月', '/').replace('日', '')}` : '';
+        const kousuMatch = appText.match(/盤配:(\d+)H・線加工(\d+)H/);
+
+        if (kousuMatch) {
+          const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
+          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
+          allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
+        } else {
+          const yoteiKousu = getValue(appText, /見積設計工数:\s*(\d+)/);
+          const naiyou = getValue(appText, /内容\s*([\s\S]*?)\n/);
+          const sagyouKubun = (naiyou.includes('線加工')) ? '線加工' : '盤配';
+          allNewRows.push(createRowData_(indices, { mgmtNo, sagyouKubun, kishu, kiban, nounyusaki, yoteiKousu, sakuzuKigen }));
+        }
+      });
+
+      // 処理が終わったファイルを移動
+      file.moveTo(processedFolder);
+      totalImportedCount++;
+    }
+
+    if (allNewRows.length > 0) {
+      const sheet = mainSheet.getSheet();
+      const lastRow = sheet.getLastRow();
+      sheet.getRange(lastRow + 1, 1, allNewRows.length, allNewRows[0].length).setValues(allNewRows);
+      SpreadsheetApp.getActiveSpreadsheet().toast(`${totalImportedCount}個のファイルから ${allNewRows.length}件のデータをインポートしました。`);
+      syncDefaultProgressToMain();
+      colorizeAllSheets();
+    } else {
+      SpreadsheetApp.getActiveSpreadsheet().toast('インポート対象の新しいファイルはありませんでした。');
+    }
 
   } catch (e) {
     Logger.log(e.stack);
-    throw new Error(`PDFの解析中にエラーが発生しました: ${e.message}`);
-  } finally {
-    // 処理が終わったら一時ファイルを完全に削除
-    if (tempFile) {
-      Drive.Files.remove(tempFile.id);
-    }
+    SpreadsheetApp.getUi().alert(`エラーが発生しました: ${e.message}`);
   }
 }
 
 /**
- * 抽出されたテキストデータを解析し、メインシートに行として追加します。
- * @param {string} text 抽出されたテキスト
+ * Drive上のPDFファイルからOCRでテキストを抽出します。
+ * @param {File} file - Google Drive の File オブジェクト
+ * @returns {string} 抽出したテキスト
  */
-function importDataFromText(text) {
-  const mainSheet = new MainSheet();
-  const sheet = mainSheet.getSheet();
-  const indices = main.getSheet().getIndices();
-
-  const applications = text.split('設計業務の外注委託申請書').filter(Boolean);
-  if (applications.length === 0) {
-    throw new Error("申請書のデータが見つかりませんでした。");
-  }
-
-  const newRows = [];
-  const year = new Date().getFullYear();
-
-  applications.forEach(appText => {
-    const mgmtNo = getValue(appText, /管理No\.\s*(\S+)/);
-    const kishu = getValue(appText, /機種:\s*([^\s機]+)/);
-    const kiban = getValue(appText, /機番:\s*(\S+)/);
-    const nounyusaki = getValue(appText, /納入先:\s*(\S+)/);
-    
-    const kikanMatch = appText.match(/設計予定期間:\s*(\d+月\d+日)\s*~\s*(\d+月\d+日)/);
-    const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace('月', '/').replace('日', '')}` : '';
-
-    const kousuMatch = appText.match(/盤配:(\d+)H・線加工(\d+)H/);
-    if (kousuMatch) {
-      const commonData = { mgmtNo, kishu, kiban, nounyusaki, sakuzuKigen };
-      newRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
-      newRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
-    } else {
-      const yoteiKousu = getValue(appText, /見積設計工数:\s*(\d+)/);
-      const naiyou = getValue(appText, /内容\s*([\s\S]*?)\n/);
-      const sagyouKubun = (naiyou.includes('線加工')) ? '線加工' : '盤配';
-      
-      newRows.push(createRowData_(indices, { mgmtNo, sagyouKubun, kishu, kiban, nounyusaki, yoteiKousu, sakuzuKigen }));
+function extractTextFromPdf(file) {
+  let tempDoc;
+  try {
+    const blob = file.getBlob();
+    const resource = { title: `temp_ocr_${file.getName()}`, mimeType: MimeType.GOOGLE_DOCS };
+    const tempDocFile = Drive.Files.insert(resource, blob, { ocr: true, ocrLanguage: 'ja' });
+    tempDoc = DocumentApp.openById(tempDocFile.id);
+    return tempDoc.getBody().getText();
+  } catch(e) {
+    throw new Error(`ファイル「${file.getName()}」のテキスト抽出に失敗しました: ${e.message}`);
+  } finally {
+    if (tempDoc) {
+      Drive.Files.remove(tempDoc.getId());
     }
-  });
-
-  if (newRows.length > 0) {
-    const lastRow = sheet.getLastRow();
-    sheet.getRange(lastRow + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
-    SpreadsheetApp.getActiveSpreadsheet().toast(`${newRows.length} 件のデータをインポートしました。`);
-    syncDefaultProgressToMain();
-    colorizeAllSheets();
-  } else {
-    SpreadsheetApp.getActiveSpreadsheet().toast('インポートできるデータがありませんでした。');
   }
 }
 
-
-function getValue(text, regex) {
-  const match = text.match(regex);
-  return match ? match[1].trim() : '';
-}
-
-function createRowData_(indices, data) {
-  const row = [];
-  row[indices.MGMT_NO - 1] = data.mgmtNo || '';
-  row[indices.SAGYOU_KUBUN - 1] = data.sagyouKubun || '';
-  row[indices.KIBAN - 1] = data.kiban || '';
-  row[indices.MODEL - 1] = data.kishu || '';
-  row[indices.DESTINATION - 1] = data.nounyusaki || '';
-  row[indices.PLANNED_HOURS - 1] = data.yoteiKousu || '';
-  row[indices.DRAWING_DEADLINE - 1] = data.sakuzuKigen || '';
-  
-  return row;
-}
+// (getValue, createRowData_ のヘルパー関数は変更なし)
+// ...

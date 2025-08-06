@@ -31,7 +31,7 @@ function onOpen(e) {
     .addItem('重複チェックと色付けを再実行', 'runColorizeAllSheets')
     .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
     .addSeparator()
-    .addItem('申請書ファイルからインポート', 'showImportDialog')
+    .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
   
   setupAllDataValidations();

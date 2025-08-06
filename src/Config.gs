@@ -6,7 +6,10 @@ const CONFIG = {
   FOLDERS: {
     REFERENCE_MATERIAL_PARENT: "1FVzgvod5z9jdbI0yrQo8G8cH0Bv1a1pn",
     SERIES_MODEL_PARENT:       "1Qol5fRzYxvEfzo9BkNVmjnGELrkgvVel",
-    BACKUP_PARENT:             "1OKyXDvCMDiAsvcZXac2BjuJDk5x1-JyO"
+    BACKUP_PARENT:             "1OKyXDvCMDiAsvcZXac2BjuJDk5x1-JyO",
+    // ★★★ フォルダIDを反映しました ★★★
+    IMPORT_SOURCE_FOLDER: "16RqfEDRYnoq09Xu2mmM3e8wQbqulOh56", // 申請書インポート用
+    PROCESSED_FOLDER:     "1T5W9vYZKoZDtD-6_clPGRUolgqpK4Zgg"  // 処理済み申請書
   },
   SHEETS: {
     MAIN:             "メインシート",
