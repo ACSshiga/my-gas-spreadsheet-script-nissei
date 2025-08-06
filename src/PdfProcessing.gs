@@ -47,24 +47,25 @@ function importFromDriveFolder() {
       applications.forEach((appText, i) => {
         Logger.log(`--- 申請書 ${i + 1} の解析開始 ---`);
         
-        // ★★★ここからが修正箇所★★★
-        // 全ての項目で、より堅牢な正規表現と診断ログを使用するように変更
         const cleanValue = (val) => val ? val.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim() : '';
         
+        // ★★★ここからが修正箇所★★★
+        // グループのインデックスを5から4に修正
         const mgmtNoMatch = appText.match(/管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)\s*(\S+)/);
-        const mgmtNo = mgmtNoMatch ? cleanValue(mgmtNoMatch[5]) : '';
+        const mgmtNo = mgmtNoMatch ? cleanValue(mgmtNoMatch[4]) : '';
         Logger.log(mgmtNo ? `[OK] 管理No: 「${mgmtNo}」` : `[NG] 管理Noが見つかりません。`);
         if (!mgmtNo) return;
 
-        const kishuMatch = appText.match(/機種\s*[:：]([\s\S]*?)(?=\s*(?:机番|機番|納入先|・機械納期))/);
+        // 他の項目もより堅牢な正規表現に修正
+        const kishuMatch = appText.match(/機種\s*[:：]([\s\S]*?)(?=\s*(机番|機番|納入先|・機械納期))/);
         const kishu = kishuMatch ? cleanValue(kishuMatch[1]) : '';
         Logger.log(kishu ? `[OK] 機種: 「${kishu}」` : `[INFO] 機種は空欄です。`);
 
-        const kibanMatch = appText.match(/機番\s*[:：]([\s\S]*?)(?=\s*(?:納入先|・機械納期))/);
+        const kibanMatch = appText.match(/機番\s*[:：]([\s\S]*?)(?=\s*(納入先|・機械納期))/);
         const kiban = kibanMatch ? cleanValue(kibanMatch[1]) : '';
         Logger.log(kiban ? `[OK] 機番: 「${kiban}」` : `[INFO] 機番は空欄です。`);
         
-        const nounyusakiMatch = appText.match(/納入先\s*[:：]([\s\S]*?)(?=\s*(?:・機械納期|入庫予定日))/);
+        const nounyusakiMatch = appText.match(/納入先\s*[:：]([\s\S]*?)(?=\s*(・機械納期|入庫予定日))/);
         const nounyusaki = nounyusakiMatch ? cleanValue(nounyusakiMatch[1]) : '';
         Logger.log(nounyusaki ? `[OK] 納入先: 「${nounyusaki}」` : `[INFO] 納入先は空欄です。`);
 
