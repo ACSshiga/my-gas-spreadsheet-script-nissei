@@ -1,6 +1,6 @@
 /**
  * Code.gs
- * イベントハンドラとカスタムメニューを管理する司令塔。
+ * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
  */
 
 // =================================================================================
@@ -24,7 +24,7 @@ function onOpen(e) {
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addSeparator()
     .addItem('各種設定と書式を再適用', 'runAllManualMaintenance')
-    .addItem('シート全体の書式を整える', 'applyStandardFormattingToAllSheets') // ★手動実行メニューを追加
+    .addItem('シート全体の書式を整える', 'applyStandardFormattingToAllSheets')
     .addItem('次の月のカレンダーを追加', 'addNextMonthColumnsToAllInputSheets')
     .addSeparator()
     .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
@@ -42,7 +42,6 @@ function onEdit(e) {
   if (!e || !e.source || !e.range) return;
   
   const lock = LockService.getScriptLock();
-  // 他の処理が終わるまで最大30秒待機する
   try {
     lock.waitLock(30000); 
   } catch (err) {
@@ -77,7 +76,6 @@ function onEdit(e) {
     Logger.log(error.stack);
     ss.toast(`エラーが発生しました: ${error.message}`, "エラー", 10);
   } finally {
-    // 処理が終わったら、必ず鍵を解放する
     lock.releaseLock();
   }
 }
@@ -98,10 +96,15 @@ function periodicMaintenance() {
  */
 function runAllManualMaintenance() {
   SpreadsheetApp.getActiveSpreadsheet().toast('各種設定と書式を適用中...', '処理中', 3);
-  setupAllDataValidations();
-  colorizeAllSheets();
+  // ★★★ 処理順序を修正 ★★★
+  // 1. 基本的な書式（フォント、サイズ、列幅、行高）を先に設定
+  applyStandardFormattingToAllSheets();
+  // 2. その上で、ヘッダーの特殊な書式を設定
   applyStandardFormattingToMainSheet();
-  applyStandardFormattingToAllSheets(); // ★書式設定をここでも呼び出す
+  // 3. 最後に、データに応じた色付け処理を実行
+  colorizeAllSheets();
+  // 4. 最後にドロップダウンリストを設定
+  setupAllDataValidations();
   SpreadsheetApp.getActiveSpreadsheet().toast('適用が完了しました。', '完了', 3);
 }
 
@@ -110,7 +113,6 @@ function runAllManualMaintenance() {
 // =================================================================================
 
 /**
- * ★★★ここからが新しい関数★★★
  * 全てのシートに標準の書式（フォント、フォントサイズ、列幅、行高）を適用します。
  */
 function applyStandardFormattingToAllSheets() {
@@ -121,19 +123,17 @@ function applyStandardFormattingToAllSheets() {
   
   allSheets.forEach(sheet => {
     try {
-      const lastRow = sheet.getLastRow();
-      const lastCol = sheet.getLastColumn();
+      const dataRange = sheet.getDataRange();
+      if (dataRange.isBlank()) return;
 
-      if (lastRow > 0 && lastCol > 0) {
-        const dataRange = sheet.getRange(1, 1, lastRow, lastCol);
-        
-        // フォントとサイズを設定
-        dataRange.setFontFamily("Arial").setFontSize(12);
-        
-        // 列と行の幅を自動調整
-        sheet.autoResizeColumns(1, lastCol);
-        sheet.autoResizeRows(1, lastRow);
-      }
+      // フォントとサイズを設定
+      dataRange.setFontFamily("Arial").setFontSize(12);
+      
+      // ★★★ 行の高さの処理を修正 ★★★
+      // 列幅はデータに合わせ、行高は25pxに統一して見た目を整える
+      sheet.autoResizeColumns(1, sheet.getLastColumn());
+      sheet.setRowHeights(1, sheet.getLastRow(), 25);
+
     } catch (e) {
       Logger.log(`シート「${sheet.getName()}」の書式設定中にエラー: ${e.message}`);
     }
@@ -161,7 +161,6 @@ function applyStandardFormattingToMainSheet() {
     Logger.log(`メインシートの標準フォーマット適用中にエラー: ${e.message}`);
   }
 }
-
 
 // =================================================================================
 // === 個人用ビュー（仮想シート）機能 ===
@@ -194,22 +193,15 @@ function createPersonalView() {
   const viewSheetName = `View_${tantoushaName}`;
   const viewSheet = ss.insertSheet(viewSheetName, 0);
   viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
-  try {
-    const headerRange = viewSheet.getRange(1, 1, 1, viewSheet.getMaxColumns());
-    headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND);
-    headerRange.setFontColor('#ffffff');
-    headerRange.setFontWeight('bold');
-    viewSheet.setFrozenRows(1);
-    viewSheet.setFrozenColumns(4);
-  } catch(e) {
-    Logger.log(`ビューシートの書式設定エラー: ${e.message}`);
-  }
-
+  
+  // Viewシートにも標準書式とメインシートのヘッダー書式を適用
+  applyStandardFormattingToAllSheets();
+  applyStandardFormattingToMainSheet();
+  
   if (personalData.length > 1) {
     viewSheet.getRange(1, 1, personalData.length, headers.length).createFilter();
   }
   
-  viewSheet.autoResizeColumns(1, headers.length);
   try {
     const viewSheetObj = {
       getSheet: () => viewSheet,
@@ -309,21 +301,17 @@ function setupAllDataValidations() {
 function colorizeAllSheets() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
-    if (mainSheet) {
-      colorizeSheet_(new MainSheet());
-    }
-
     const allSheets = ss.getSheets();
+
     allSheets.forEach(sheet => {
       const sheetName = sheet.getName();
-      if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-        try {
+      try {
+        if (sheetName === CONFIG.SHEETS.MAIN) {
+          colorizeSheet_(new MainSheet());
+        } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
           const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
           colorizeSheet_(new InputSheet(tantoushaName));
-        } catch (e) { /* エラーは無視 */ }
-      } else if (sheetName.startsWith('View_')) {
-        try {
+        } else if (sheetName.startsWith('View_')) {
           const viewSheetObj = {
             getSheet: () => sheet,
             indices: getColumnIndices(sheet, MAIN_SHEET_HEADERS),
@@ -331,9 +319,9 @@ function colorizeAllSheets() {
             getLastRow: () => sheet.getLastRow()
           };
           colorizeSheet_(viewSheetObj);
-        } catch (e) {
-          Logger.log(`Viewシート ${sheetName} の色付けエラー: ${e.message}`);
         }
+      } catch (e) {
+        Logger.log(`シート「${sheetName}」の色付け処理中にエラー: ${e.message}`);
       }
     });
     logWithTimestamp("全シートの色付け処理が完了しました。");
