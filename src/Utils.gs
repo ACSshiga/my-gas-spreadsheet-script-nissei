@@ -28,7 +28,7 @@ function getJapaneseHolidays(year) {
     const endDate = new Date(year, 11, 31);
     const events = calendar.getEvents(startDate, endDate);
     const holidays = new Set(events.map(e => formatDateForComparison(e.getStartTime())));
-    cache.put(cacheKey, JSON.stringify([...holidays]), 21600); // 6時間キャッシュ
+    cache.put(cacheKey, JSON.stringify([...holidays]), 21600);
     return holidays;
   } catch (e) {
     console.error("祝日取得エラー:", e);
@@ -39,7 +39,7 @@ function getJapaneseHolidays(year) {
 function isHoliday(date, holidaySet) {
   if (!isValidDate(date)) return false;
   const dayOfWeek = date.getDay();
-  if (dayOfWeek === 0 || dayOfWeek === 6) return true; // 土日
+  if (dayOfWeek === 0 || dayOfWeek === 6) return true;
   return holidaySet.has(formatDateForComparison(date));
 }
 
@@ -70,27 +70,50 @@ function toNumber(value) {
 // =================================================================================
 // === マスタデータ取得ユーティリティ ===
 // =================================================================================
-function getMasterData(masterSheetName, numColumns = 1) {
-  const cache = CacheService.getScriptCache();
-  const cacheKey = `master_${masterSheetName}_${numColumns}`;
-  const cached = cache.get(cacheKey);
-
-  if (cached) {
-    try {
-      return JSON.parse(cached);
-    } catch (e) { /* ignore */ }
-  }
-
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(masterSheetName);
+/**
+ * マスタシートからデータを取得します。
+ * @param {string} masterSheetName - マスタシート名
+ * @param {number} numColumns - 取得する列数 (省略可能)
+ */
+function getMasterData(masterSheetName, numColumns) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(masterSheetName);
   if (!sheet) return [];
+
+  const colsToFetch = numColumns || sheet.getLastColumn();
+
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, numColumns).getValues();
-  const filteredValues = values.filter(row => row[0] !== "");
-  cache.put(cacheKey, JSON.stringify(filteredValues), 3600); // 1時間キャッシュ
-  return filteredValues;
+  const values = sheet.getRange(2, 1, lastRow - 1, colsToFetch).getValues();
+  return values.filter(row => row[0] !== "");
 }
+
+/**
+ * 各マスタシートから色の対応表（Map）を作成します。
+ * @param {string} sheetName - マスタシート名
+ * @param {number} keyColIndex - キーとなる項目が含まれる列（0始まり）
+ * @param {number} colorColIndex - カラーコードが含まれる列（0始まり）
+ */
+function getColorMapFromMaster(sheetName, keyColIndex, colorColIndex) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = `color_map_${sheetName}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try {
+      return new Map(JSON.parse(cached));
+    } catch (e) { /* ignore */ }
+  }
+
+  const masterData = getMasterData(sheetName);
+  const colorMap = new Map(
+    masterData.map(row => [row[keyColIndex], row[colorColIndex]])
+  );
+
+  cache.put(cacheKey, JSON.stringify([...colorMap]), 3600); // 1時間キャッシュ
+  return colorMap;
+}
+
 
 function getTantoushaNameByEmail(email) {
   if (!email) return null;

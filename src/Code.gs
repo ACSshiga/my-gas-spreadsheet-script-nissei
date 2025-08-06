@@ -1,7 +1,6 @@
 /**
  * Code.gs
  * イベントハンドラとカスタムメニューを管理する司令塔。
- * ★★★ Coloring.gs の内容を統合済み ★★★
  */
 
 // =================================================================================
@@ -32,8 +31,8 @@ function onOpen(e) {
     .addItem('重複チェックと色付けを再実行', 'runColorizeAllSheets')
     .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
     .addToUi();
-  setupAllDataValidations();
   
+  setupAllDataValidations();
   syncDefaultProgressToMain();
   colorizeAllSheets();
 }
@@ -50,6 +49,8 @@ function onEdit(e) {
   const ss = e.source;
 
   try {
+    setupAllDataValidations(); // 編集の最初にデータ入力規則を更新
+
     const sheet = e.range.getSheet();
     const sheetName = sheet.getName();
     if (sheetName === CONFIG.SHEETS.MAIN) {
@@ -202,7 +203,7 @@ function setupAllDataValidations() {
       };
       for (const [masterName, colIndex] of Object.entries(mainValidationMap)) {
         if(colIndex) {
-          const masterValues = getMasterData(masterName).flat();
+          const masterValues = getMasterData(masterName).map(row => row[0]); // 1列目だけを取得
           if (masterValues.length > 0) {
             const rule = SpreadsheetApp.newDataValidation().requireValueInList(masterValues).setAllowInvalid(false).build();
             mainSheetObj.getRange(mainSheetInstance.startRow, colIndex, mainLastRow - mainSheetInstance.startRow + 1).setDataValidation(rule);
@@ -214,7 +215,7 @@ function setupAllDataValidations() {
       }
     }
 
-    const progressValues = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER).flat();
+    const progressValues = getMasterData(CONFIG.SHEETS.SHINCHOKU_MASTER).map(row => row[0]); // 1列目だけを取得
     if (progressValues.length > 0) {
       const progressRule = SpreadsheetApp.newDataValidation().requireValueInList(progressValues).setAllowInvalid(false).build();
       const allSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
@@ -241,22 +242,25 @@ function setupAllDataValidations() {
 }
 
 // =================================================================================
-// === 色付け処理 (旧Coloring.gs) ===
+// === 色付け処理 ===
 // =================================================================================
 
 function colorizeAllSheets() {
   try {
-    const mainSheet = new MainSheet();
-    colorizeSheet_(mainSheet);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
+    if (mainSheet) {
+      colorizeSheet_(new MainSheet());
+    }
 
-    const allSheets = SpreadsheetApp.getActiveSpreadsheet().getSheets();
+    const allSheets = ss.getSheets();
     allSheets.forEach(sheet => {
       const sheetName = sheet.getName();
       if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
         try {
           const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
-          const inputSheet = new InputSheet(tantoushaName);
-          colorizeSheet_(inputSheet);
+          colorizeSheet_(new InputSheet(tantoushaName));
         } catch (e) { /* エラーは無視 */ }
       } else if (sheetName.startsWith('View_')) {
         try {
@@ -279,6 +283,11 @@ function colorizeAllSheets() {
 }
 
 function colorizeSheet_(sheetObject) {
+  const PROGRESS_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
+  const TANTOUSHA_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TANTOUSHA_MASTER, 0, 2);
+  const SAGYOU_KUBUN_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, 0, 1);
+  const TOIAWASE_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TOIAWASE_MASTER, 0, 1);
+
   const sheet = sheetObject.getSheet();
   const indices = sheetObject.indices;
   const lastRow = sheetObject.getLastRow();
@@ -331,28 +340,22 @@ function colorizeSheet_(sheetObject) {
         restrictedRanges.push(sheet.getRange(startRow + i, tantoushaCol));
       }
     } else {
-      // 既存の色をリセット
       for (let j = 0; j < lastCol; j++) {
           if(!formulas[i][j]) backgroundColors[i][j] = CONFIG.COLORS.DEFAULT_BACKGROUND;
       }
 
       if (progressCol) {
         const progressValue = safeTrim(row[progressCol - 1]);
-        let progressColor;
-
-        if (progressValue === "") {
-            progressColor = CONFIG.COLORS.DEFAULT_BACKGROUND;
-        } else {
-            progressColor = getColor(PROGRESS_COLORS, progressValue);
-        }
+        const progressColor = (progressValue === "")
+          ? CONFIG.COLORS.DEFAULT_BACKGROUND
+          : getColor(PROGRESS_COLORS, progressValue);
         
         backgroundColors[i][progressCol - 1] = progressColor;
         if (mgmtNoCol) backgroundColors[i][mgmtNoCol - 1] = progressColor;
       }
 
       if (sagyouKubunCol) {
-        const sagyouKubunColor = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]));
-        backgroundColors[i][sagyouKubunCol - 1] = sagyouKubunColor;
+        backgroundColors[i][sagyouKubunCol - 1] = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]));
       }
 
       if (sheetObject instanceof MainSheet || sheet.getName().startsWith('View_')) {
@@ -385,7 +388,7 @@ function colorizeSheet_(sheetObject) {
       restrictedRanges.forEach(range => range.setDataValidation(restrictedRule));
     }
     if (normalRanges.length > 0) {
-      const masterValues = getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER).flat();
+      const masterValues = getMasterData(CONFIG.SHEETS.TANTOUSHA_MASTER).map(row => row[0]);
       if (masterValues.length > 0) {
         const normalRule = SpreadsheetApp.newDataValidation()
           .requireValueInList(masterValues)
