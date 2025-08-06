@@ -39,7 +39,6 @@ function importFromDriveFolder() {
     filesForProcessing.forEach(file => {
       const text = extractTextFromPdf(file);
       
-      // ★★★ デバッグログを追加 ★★★
       Logger.log(`===== PDFファイル「${file.getName()}」から抽出したテキスト =====`);
       Logger.log(text);
       Logger.log(`========================================================`);
@@ -53,10 +52,7 @@ function importFromDriveFolder() {
 
       applications.forEach((appText, i) => {
         Logger.log(`--- 申請書 ${i + 1} の解析開始 ---`);
-        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-        // 修正箇所：キャプチャグループのインデックスを 5 から 4 に修正
         const mgmtNo = getValue(appText, /管理(N|Ｎ)(o|ｏ|O|Ｏ)(\.|．)\s*(\S+)/, 4);
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         if (!mgmtNo) {
           Logger.log('管理Noが見つからないためスキップします。');
           return;
@@ -64,7 +60,10 @@ function importFromDriveFolder() {
 
         const kishu = getValue(appText, /機種\s*(:|：)\s*([\s\S]*?)(?=机番:|機番:|納入先:|・機械納期:)/, 2);
         const kiban = getValue(appText, /機番\s*(:|：)\s*([\s\S]*?)(?=納入先:|・機械納期:|入庫予定日:)/, 2);
-        const nounyusaki = getValue(appText, /納入先\s*(:|：)\s*([\s\S]*?)(?=\n|・機械納期:|入庫予定日:|・設計予定期間:)/, 2);
+        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        // 修正箇所：納入先を抽出する正規表現をより厳密なものに変更
+        const nounyusaki = getValue(appText, /納入先\s*[:：]\s*([\s\S]*?)(?=\s*・機械納期|\s*入庫予定日|\s*見積設計工数|\s*留意事項|\s*・設計予定期間|\n)/, 2);
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         
         const kikanMatch = appText.match(/設計予定期間:?\s*(\d+\s*月\s*\d+\s*日)\s*~\s*(\d+\s*月\s*\d+\s*日)/);
         const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace(/\s/g, '').replace('月', '/').replace('日', '')}` : '';
