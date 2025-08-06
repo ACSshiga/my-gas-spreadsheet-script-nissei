@@ -28,9 +28,7 @@ const CONFIG = {
   // 色設定
   COLORS: {
     DEFAULT_BACKGROUND: '#ffffff',
-    WEEKEND_HOLIDAY:    '#f2f2f2',
-    HEADER_BACKGROUND:  '#e2e2e2', // ヘッダー行用の背景色
-    ALT_ROW_BACKGROUND: '#f9f9f9'  // 一行おきに塗る背景色
+    WEEKEND_HOLIDAY:    '#f2f2f2'
   },
 
   // データ開始行
