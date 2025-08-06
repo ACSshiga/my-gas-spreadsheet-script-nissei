@@ -36,7 +36,6 @@ function importFromDriveFolder() {
     const mainSheet = new MainSheet();
     const indices = mainSheet.indices;
     const year = new Date().getFullYear();
-
     filesForProcessing.forEach(file => {
       const text = extractTextFromPdf(file);
       
@@ -63,8 +62,11 @@ function importFromDriveFolder() {
         const kiban = getValue(appText, /機番\s*([:：])\s*([\s\S]*?)(?=\s*納入先\s*[:：]|\s*・機械納期|\s*入庫予定日|\n)/, 2);
         const nounyusaki = getValue(appText, /納入先\s*([:：])\s*([\s\S]*?)(?=\s*・機械納期|\s*入庫予定日|\s*見積設計工数|\s*留意事項|\s*・設計予定期間|\n)/, 2);
         
-        const kikanMatch = appText.match(/設計予定期間:?\s*(\d+\s*月\s*\d+\s*日)\s*~\s*(\d+\s*月\s*\d+\s*日)/);
+        // ★★★ここからが修正箇所★★★
+        // 区切り文字として「~」「～」「-」を許容するように修正
+        const kikanMatch = appText.match(/設計予定期間:?\s*(\d+\s*月\s*\d+\s*日)\s*[~～-]\s*(\d+\s*月\s*\d+\s*日)/);
         const sakuzuKigen = kikanMatch ? `${year}/${kikanMatch[2].replace(/\s/g, '').replace('月', '/').replace('日', '')}` : '';
+        // ★★★ここまでが修正箇所★★★
 
         const kousuMatch = appText.match(/盤配\s*[:：]\s*(\d+)\s*H[\s\S]*?線加工\s*(\d+)\s*H/);
         if (kousuMatch) {
@@ -72,8 +74,7 @@ function importFromDriveFolder() {
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '盤配', yoteiKousu: kousuMatch[1] }));
           allNewRows.push(createRowData_(indices, { ...commonData, sagyouKubun: '線加工', yoteiKousu: kousuMatch[2] }));
         } else {
-          const yoteiKousu = getValue(appText, /見積設計工数\s*[:：]\s*(\d+)/) ||
-                             getValue(appText, /(\d+)\s*Η/) || getValue(appText, /(\d+)\s*H/);
+          const yoteiKousu = getValue(appText, /見積設計工数\s*[:：]\s*(\d+)/) || getValue(appText, /(\d+)\s*Η/) || getValue(appText, /(\d+)\s*H/);
           const naiyou = getValue(appText, /内容\s*([\s\S]*?)(?=\n\s*2\.\s*委託金額|\n\s*上記期間)/);
           
           let sagyouKubun = '盤配';
@@ -88,13 +89,12 @@ function importFromDriveFolder() {
       file.moveTo(processedFolder);
       totalImportedCount++;
     });
-
     if (allNewRows.length > 0) {
       const sheet = mainSheet.getSheet();
       const lastRow = sheet.getLastRow();
       sheet.getRange(lastRow + 1, 1, allNewRows.length, allNewRows[0].length).setValues(allNewRows);
       ui.alert(`${totalImportedCount}個のファイルから ${allNewRows.length}件のデータをインポートしました。`);
-      syncDefaultProgressToMain();
+      syncMainToAllInputSheets(); // 修正：syncDefaultProgressToMainは統合されたのでこちらを呼ぶ
       colorizeAllSheets();
     } else if (totalImportedCount > 0) {
       ui.alert(`${totalImportedCount}個のファイルを処理しましたが、シートに追加できる有効なデータが見つかりませんでした。Cloud Logsに詳細なデバッグ情報が出力されています。`);
