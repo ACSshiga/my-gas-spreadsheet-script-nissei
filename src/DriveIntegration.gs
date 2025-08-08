@@ -1,7 +1,7 @@
 /**
  * DriveIntegration.gs
  * Google Driveとの連携機能（フォルダ作成、バックアップ）を管理します。
- * (データ保護とエラーへのリトライ機能を強化した最終改訂版)
+ * (管理表の作成タイミングを分離)
  */
 
 // =================================================================================
@@ -24,26 +24,20 @@ function bulkCreateMaterialFolders() {
     }
 
     const lastRow = mainSheet.getLastRow();
-    if (lastRow < mainSheet.startRow) {
-      ss.toast("データがありません。");
-      return;
-    }
+    if (lastRow < mainSheet.startRow) return;
 
     const range = sheet.getRange(mainSheet.startRow, 1, lastRow - mainSheet.startRow + 1, mainSheet.getLastColumn());
     const values = range.getValues();
     const formulas = range.getFormulas();
 
-    // 手順1: リンクが未作成のユニークな「機番」と「機種」を収集
-    const uniqueKibans = new Map();
+    const uniqueKibans = new Set();
     const uniqueModels = new Set();
     values.forEach((row, i) => {
-      if (!formulas[i][indices.KIBAN_URL - 1] && String(row[indices.KIBAN_URL - 1]).trim() === '') {
+      if (!formulas[i][indices.KIBAN_URL - 1]) {
         const kiban = String(row[indices.KIBAN - 1]).trim();
-        if (kiban && !uniqueKibans.has(kiban)) {
-          uniqueKibans.set(kiban, String(row[indices.MODEL - 1]).trim());
-        }
+        if (kiban) uniqueKibans.add(kiban);
       }
-      if (!formulas[i][indices.SERIES_URL - 1] && String(row[indices.SERIES_URL - 1]).trim() === '') {
+      if (!formulas[i][indices.SERIES_URL - 1]) {
         const model = String(row[indices.MODEL - 1]).trim();
         if (model) {
           const match = model.match(/^[A-Za-z]+[0-9]+/);
@@ -52,15 +46,11 @@ function bulkCreateMaterialFolders() {
       }
     });
 
-    // 手順2: フォルダを一括作成し、URLをマップに保存
     const kibanUrlMap = new Map();
-    uniqueKibans.forEach((model, kiban) => {
+    uniqueKibans.forEach(kiban => {
       const folderResult = getOrCreateFolder_(kiban, CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT);
       if (folderResult && folderResult.folder) {
         kibanUrlMap.set(kiban, folderResult.folder.getUrl());
-        if (folderResult.isNew) {
-           createManagementSheet_(folderResult.folder, kiban, model);
-        }
       }
     });
 
@@ -71,12 +61,8 @@ function bulkCreateMaterialFolders() {
         modelUrlMap.set(modelPrefix, folderResult.folder.getUrl());
       }
     });
-
-    // 手順3: 元のデータを保持し、変更箇所だけを更新する安全な方法
-    const outputData = values.map((row, i) =>
-      row.map((cell, j) => formulas[i][j] || cell)
-    );
-
+    
+    const outputData = values.map((row, i) => row.map((cell, j) => formulas[i][j] || cell));
     let modified = false;
     values.forEach((row, i) => {
       const kiban = String(row[indices.KIBAN - 1]).trim();
@@ -95,7 +81,6 @@ function bulkCreateMaterialFolders() {
       }
     });
 
-    // 手順4: 変更があった場合のみ、シートに書き戻す
     if (modified) {
       range.setValues(outputData);
       ss.toast("資料フォルダの作成とリンク設定が完了しました。");
@@ -108,7 +93,6 @@ function bulkCreateMaterialFolders() {
     ss.toast(`エラー: ${error.message}`);
   }
 }
-
 
 /**
  * テンプレートのスプレッドシートをコピーし、情報を書き込んでフォルダに保存する
@@ -124,14 +108,21 @@ function createManagementSheet_(targetFolder, kiban, model) {
   try {
     const templateFile = DriveApp.getFileById(templateId);
     const newFileName = `${kiban}盤配指示図出図管理表`;
+    
+    // 重複作成を防止
+    const existingFiles = targetFolder.getFilesByName(newFileName);
+    if (existingFiles.hasNext()) {
+      Logger.log(`管理表「${newFileName}」は既に存在するため、作成をスキップします。`);
+      return;
+    }
+
     const newFile = templateFile.makeCopy(newFileName, targetFolder);
     const newFileId = newFile.getId();
 
     let success = false;
-    let attempts = 4; // 再試行回数を4回に増加
-    let waitTime = 2000; // 初回の待機時間を2秒に設定
+    let attempts = 4;
+    let waitTime = 2000;
 
-    // ファイル作成後、最初の操作の前に少し待つ
     Utilities.sleep(2000);
 
     for (let i = 0; i < attempts; i++) {
@@ -146,14 +137,15 @@ function createManagementSheet_(targetFolder, kiban, model) {
         
         success = true;
         Logger.log(`管理表「${newFileName}」をフォルダ「${targetFolder.getName()}」に作成し、編集しました。`);
-        break; // 成功したのでループを抜ける
+        SpreadsheetApp.getActiveSpreadsheet().toast(`管理表「${newFileName}」を作成しました。`);
+        break;
       } catch (e) {
         if (e.message.includes("サービスに接続できなくなりました")) {
           Logger.log(`試行 ${i + 1}/${attempts}: スプレッドシートサービスへの接続に失敗。${waitTime / 1000}秒後に再試行します。`);
           Utilities.sleep(waitTime);
-          waitTime *= 2; // 次の待機時間を2倍にする
+          waitTime *= 2;
         } else {
-          throw e; // その他の予期せぬエラーは再スロー
+          throw e;
         }
       }
     }
@@ -197,14 +189,11 @@ function createWeeklyBackup() {
     if (!CONFIG.FOLDERS.BACKUP_PARENT) {
       throw new Error("バックアップ用フォルダIDが設定されていません。");
     }
-
     const originalName = ss.getName();
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), DATE_FORMATS.BACKUP_TIMESTAMP);
     const backupFileName = `${CONFIG.BACKUP.PREFIX}${originalName}_${timestamp}`;
     const parentFolder = DriveApp.getFolderById(CONFIG.FOLDERS.BACKUP_PARENT);
-
     DriveApp.getFileById(ss.getId()).makeCopy(backupFileName, parentFolder);
-
     const files = parentFolder.getFiles();
     const backupFiles = [];
     while (files.hasNext()) {
@@ -213,7 +202,6 @@ function createWeeklyBackup() {
         backupFiles.push(file);
       }
     }
-
     if (backupFiles.length > CONFIG.BACKUP.KEEP_COUNT) {
       backupFiles.sort((a, b) => a.getDateCreated() - b.getDateCreated());
       const toDeleteCount = backupFiles.length - CONFIG.BACKUP.KEEP_COUNT;
