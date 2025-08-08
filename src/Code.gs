@@ -1,6 +1,7 @@
 /**
  * Code.gs
  * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
+ * QUERY関数による常時同期ビューに対応。
  */
 
 // =================================================================================
@@ -11,12 +12,10 @@
  * onOpen: ファイルを開いた時に実行される処理
  */
 function onOpen(e) {
-  // カスタムメニューの作成
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('カスタムメニュー')
-    .addItem('自分の担当案件のみ表示', 'createPersonalView')
-    .addItem('表示を更新', 'refreshPersonalView') 
-    .addItem('フィルタ表示を終了', 'removePersonalView')
+    .addItem('ソートビューを作成', 'createSortedView')
+    .addItem('ソートビューを全て削除', 'removeAllSortedViews') // 変更
     .addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
     .addSeparator()
@@ -31,19 +30,19 @@ function onOpen(e) {
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
     .addToUi();
 
-  // onOpenで実行する処理の順番を最適化
+  // onOpenで実行する処理
   syncMainToAllInputSheets();
   applyStandardFormattingToAllSheets();
   applyStandardFormattingToMainSheet();
   colorizeAllSheets();
 }
 
+
 /**
  * onEdit: 編集イベントを処理する司令塔 (待機処理を追加)
  */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
-  
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(30000); 
@@ -87,16 +86,10 @@ function onEdit(e) {
 // === メンテナンス用関数 ===
 // =================================================================================
 
-/**
- * 定期実行（毎時）で呼び出される関数
- */
 function periodicMaintenance() {
   setupAllDataValidations();
 }
 
-/**
- * 手動実行用の統合関数
- */
 function runAllManualMaintenance() {
   SpreadsheetApp.getActiveSpreadsheet().toast('各種設定と書式を適用中...', '処理中', 3);
   applyStandardFormattingToAllSheets();
@@ -110,14 +103,10 @@ function runAllManualMaintenance() {
 // === 書式設定 ===
 // =================================================================================
 
-/**
- * 全てのシートにおしゃれな書式を適用します。
- */
 function applyStandardFormattingToAllSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const allSheets = ss.getSheets();
-  
-  ss.toast('全シートの書式をおしゃれに更新中...', '処理中');
+  ss.toast('全シートの書式を更新中...', '処理中');
   
   allSheets.forEach(sheet => {
     try {
@@ -126,21 +115,18 @@ function applyStandardFormattingToAllSheets() {
       const lastCol = sheet.getLastColumn();
       const lastRow = sheet.getLastRow();
 
-      // 1. 基本書式（フォント、サイズ、配置、罫線）を適用
       dataRange
         .setFontFamily("Arial")
         .setFontSize(12)
         .setVerticalAlignment("middle")
         .setBorder(true, true, true, true, true, true, "#cccccc", SpreadsheetApp.BorderStyle.SOLID);
 
-      // 2. ヘッダーを中央揃え
       const headerRange = sheet.getRange(1, 1, 1, lastCol);
       headerRange.setHorizontalAlignment("center");
 
-      // 3. 数字の列を右揃え
       const sheetName = sheet.getName();
       let indices;
-      if (sheetName === CONFIG.SHEETS.MAIN || sheetName.startsWith('View_')) {
+      if (sheetName === CONFIG.SHEETS.MAIN || sheetName.startsWith('ソートビュー')) {
         indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
         const numberCols = [indices.PLANNED_HOURS, indices.ACTUAL_HOURS];
         numberCols.forEach(colIndex => {
@@ -157,7 +143,7 @@ function applyStandardFormattingToAllSheets() {
           }
         });
         if (indices.SEPARATOR) {
-           const dateColStart = indices.SEPARATOR + 2; // 日付入力開始列
+           const dateColStart = indices.SEPARATOR + 2;
            if (lastCol >= dateColStart && lastRow > 2) {
              sheet.getRange(3, dateColStart, lastRow - 2, lastCol - dateColStart + 1).setHorizontalAlignment("right");
            }
@@ -171,16 +157,12 @@ function applyStandardFormattingToAllSheets() {
   ss.toast('全シートの書式を更新しました。', '完了', 3);
 }
 
-
-/**
- * メインシートとViewシートにヘッダーの色付けとウィンドウ枠の固定を適用します。
- */
 function applyStandardFormattingToMainSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetsToFormat = [ss.getSheetByName(CONFIG.SHEETS.MAIN), ss.getActiveSheet()];
-  
-  sheetsToFormat.forEach(sheet => {
-    if (sheet && (sheet.getName() === CONFIG.SHEETS.MAIN || sheet.getName().startsWith('View_'))) {
+  const allSheets = ss.getSheets();
+
+  allSheets.forEach(sheet => {
+    if (sheet && (sheet.getName() === CONFIG.SHEETS.MAIN || sheet.getName().startsWith('ソートビュー'))) {
       try {
         const headerRange = sheet.getRange(1, 1, 1, sheet.getMaxColumns());
         headerRange.setBackground(CONFIG.COLORS.HEADER_BACKGROUND)
@@ -196,88 +178,75 @@ function applyStandardFormattingToMainSheet() {
   });
 }
 
-
 // =================================================================================
-// === 個人用ビュー（仮想シート）機能 ===
+// === ソートビュー（QUERY関数版）機能 ===
 // =================================================================================
-function refreshPersonalView() {
-  SpreadsheetApp.getActiveSpreadsheet().toast('表示を更新しています...', '処理中', 5);
-  removePersonalView(false);
-  createPersonalView();
-}
 
-function createPersonalView() {
+/**
+ * メインシートのデータを常時同期・ソートする新しいシート「ソートビュー」を作成します。
+ * 既に存在する場合は連番を付与して複数作成します。
+ */
+function createSortedView() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const userEmail = Session.getActiveUser().getEmail();
-  const tantoushaName = getTantoushaNameByEmail(userEmail);
-  if (!tantoushaName) {
-    SpreadsheetApp.getUi().alert('あなたのメールアドレスが担当者マスタに見つかりません。');
+  const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
+  if (!mainSheet) {
+    SpreadsheetApp.getUi().alert('メインシートが見つかりません。');
     return;
   }
 
-  const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
   const mainIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
+  const sortColumnIndex = mainIndices.MGMT_NO; // '管理No'でソート
+  if (!sortColumnIndex) {
+      SpreadsheetApp.getUi().alert('ソートキーとなる「管理No」列が見つかりません。');
+      return;
+  }
+
+  // --- 新しいビューシートの名前を決定（連番処理） ---
+  let viewSheetName = 'ソートビュー';
+  let counter = 2;
+  while (ss.getSheetByName(viewSheetName)) {
+    viewSheetName = `ソートビュー (${counter})`;
+    counter++;
+  }
+
+  // --- QUERY関数を構築 ---
+  const mainSheetName = mainSheet.getName();
+  const lastColLetter = mainSheet.getRange(1, mainSheet.getLastColumn()).getA1Notation().replace("1", "");
+  const dataRange = `'${mainSheetName}'!A:${lastColLetter}`;
   
-  const mainDataRange = mainSheet.getDataRange();
-  const mainValues = mainDataRange.getValues();
-  const mainFormulas = mainDataRange.getFormulas();
-  
-  const headers = mainFormulas[0]; // ヘッダー行は数式ごと取得
-  const personalData = [headers];
+  // アルファベットの列名を取得 (1 -> A, 2 -> B, ...)
+  const sortColLetter = String.fromCharCode(64 + sortColumnIndex);
 
-  mainValues.forEach((row, index) => {
-    if (index > 0 && row[mainIndices.TANTOUSHA - 1] === tantoushaName) {
-      const rowData = row.map((cell, colIndex) => mainFormulas[index][colIndex] || cell);
-      personalData.push(rowData);
-    }
-  });
+  // メインシートのヘッダー行を除いてクエリを実行し、結果をソートする
+  const formula = `=QUERY(${dataRange}, "SELECT * WHERE A IS NOT NULL ORDER BY ${sortColLetter} ASC", 1)`;
 
-  removePersonalView(false);
-
-  const viewSheetName = `View_${tantoushaName}`;
+  // --- シートを作成し、関数をセット ---
   const viewSheet = ss.insertSheet(viewSheetName, 0);
-  
-  viewSheet.getRange(1, 1, personalData.length, headers.length).setValues(personalData);
-  
-  applyStandardFormattingToAllSheets();
-  applyStandardFormattingToMainSheet();
-  
-  if (personalData.length > 1) {
-    viewSheet.getRange(1, 1, personalData.length, headers.length).createFilter();
-  }
-  
-  try {
-    const viewSheetObj = {
-      getSheet: () => viewSheet,
-      indices: mainIndices,
-      startRow: 2,
-      getLastRow: () => viewSheet.getLastRow()
-    };
-    colorizeSheet_(viewSheetObj);
-  } catch (e) {
-    Logger.log(`Viewシートの色付けエラー: ${e.message}`);
-  }
+  viewSheet.getRange("A1").setFormula(formula);
+
+  // --- 書式を適用 ---
+  applyStandardFormattingToMainSheet(); // ヘッダーと固定枠
   
   viewSheet.activate();
-  ss.toast(`${tantoushaName}さん専用の表示を作成しました。`, '完了', 3);
+  ss.toast(`${viewSheetName} を作成しました。メインシートと常時同期されます。`, '完了', 5);
 }
 
-function removePersonalView(showMessage = true) {
+
+/**
+ * すべてのソートビューを削除します。
+ */
+function removeAllSortedViews(showMessage = true) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const userEmail = Session.getActiveUser().getEmail();
-  const tantoushaName = getTantoushaNameByEmail(userEmail);
-  if (tantoushaName) {
-    const viewSheetName = `View_${tantoushaName}`;
-    const sheetToDelete = ss.getSheetByName(viewSheetName);
-    if (sheetToDelete) {
-      ss.deleteSheet(sheetToDelete);
+  ss.getSheets().forEach(sheet => {
+    if (sheet.getName().startsWith('ソートビュー')) {
+      ss.deleteSheet(sheet);
     }
-  }
+  });
 
   const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN)
   if(mainSheet) mainSheet.activate();
   if (showMessage) {
-    ss.toast('フィルタ表示を終了しました。', '完了', 3);
+    ss.toast('すべてのソートビューを削除しました。', '完了', 3);
   }
 }
 
@@ -355,7 +324,12 @@ function colorizeAllSheets() {
         } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
           const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
           colorizeSheet_(new InputSheet(tantoushaName));
-        } else if (sheetName.startsWith('View_')) {
+        } 
+        // QUERY関数で生成されるビューの色付けは、元のメインシートの書式を引き継ぐため、
+        // ここでの個別の色付け処理は不要になります。
+        // もしビュー独自の書式ルールが必要な場合は、ここのコメントを解除して実装します。
+        /*
+        else if (sheetName.startsWith('ソートビュー')) {
           const viewSheetObj = {
             getSheet: () => sheet,
             indices: getColumnIndices(sheet, MAIN_SHEET_HEADERS),
@@ -364,11 +338,12 @@ function colorizeAllSheets() {
           };
           colorizeSheet_(viewSheetObj);
         }
+        */
       } catch (e) {
         Logger.log(`シート「${sheetName}」の色付け処理中にエラー: ${e.message}`);
       }
     });
-    logWithTimestamp("全シートの色付け処理が完了しました。");
+    logWithTimestamp("メインシートと工数シートの色付け処理が完了しました。");
   } catch (error) {
     Logger.log(`色付け処理でエラーが発生しました: ${error.stack}`);
   }
@@ -376,6 +351,11 @@ function colorizeAllSheets() {
 
 
 function colorizeSheet_(sheetObject) {
+  // QUERYで生成されるビューはメインシートの書式を継承するため、この関数からは除外
+  if (sheetObject.getSheet().getName().startsWith('ソートビュー')) {
+      return;
+  }
+    
   const PROGRESS_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
   const TANTOUSHA_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TANTOUSHA_MASTER, 0, 2);
   const SAGYOU_KUBUN_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, 0, 1);
@@ -395,7 +375,6 @@ function colorizeSheet_(sheetObject) {
   const outputValues = values.map((row, i) => {
     return row.map((cell, j) => formulas[i][j] || cell);
   });
-
   const backgroundColors = fullRange.getBackgrounds();
 
   const mgmtNoCol = indices.MGMT_NO;
@@ -459,7 +438,7 @@ function colorizeSheet_(sheetObject) {
         }
       }
 
-      if (sheetObject instanceof MainSheet || sheet.getName().startsWith('View_')) {
+      if (sheetObject instanceof MainSheet) {
         if (tantoushaCol) {
           const color = getColor(TANTOUSHA_COLORS, safeTrim(row[tantoushaCol - 1]), baseColor);
           if (color !== baseColor) {
