@@ -1,7 +1,7 @@
 /**
  * Code.gs
  * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
- * QUERY関数による常時同期ビューと、動的な条件付き書式に対応。
+ * データコピー方式による、リンク・書式対応の多機能ソートビューを実装。
  */
 
 // =================================================================================
@@ -62,11 +62,12 @@ function onEdit(e) {
 }
 
 // =================================================================================
-// === ソートビュー（QUERY関数版）機能 ===
+// === ソートビュー（データコピー方式）機能 ===
 // =================================================================================
 
 /**
- * メインシートのデータを常時同期・ソートする新しいシート「ソートビュー」を作成します。
+ * メインシートのデータをコピー・ソートし、新しい「ソートビュー」シートを作成します。
+ * リンク、書式、色、フィルタが完全に適用されます。
  */
 function createSortedView() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -83,6 +84,32 @@ function createSortedView() {
       return;
   }
 
+  // --- 空白行を除いた実データ範囲を取得 ---
+  const lastRow = mainSheet.getLastRow();
+  if (lastRow < CONFIG.DATA_START_ROW.MAIN) {
+    SpreadsheetApp.getUi().alert('メインシートにデータがありません。');
+    return;
+  }
+  const mainDataRange = mainSheet.getRange(1, 1, lastRow, mainSheet.getLastColumn());
+  const mainValues = mainDataRange.getValues();
+  const mainFormulas = mainDataRange.getFormulas();
+
+  // 数式と値を結合（数式を優先）。これによりリンク情報が引き継がれる
+  const combinedData = mainValues.map((row, i) =>
+    row.map((cell, j) => mainFormulas[i][j] || cell)
+  );
+
+  const headers = combinedData.shift(); // ヘッダーを分離
+  
+  // '管理No'列を基準にデータ行をソート
+  combinedData.sort((a, b) => {
+    const valA = a[sortColumnIndex - 1];
+    const valB = b[sortColumnIndex - 1];
+    return String(valA).localeCompare(String(valB), undefined, {numeric: true});
+  });
+
+  const sortedData = [headers, ...combinedData];
+
   // 新しいビューシートの名前を決定（連番処理）
   let viewSheetName = 'ソートビュー';
   let counter = 2;
@@ -90,30 +117,14 @@ function createSortedView() {
     viewSheetName = `ソートビュー (${counter})`;
     counter++;
   }
-
-  // QUERY関数を構築
-  const mainSheetName = mainSheet.getName();
-  const lastColLetter = mainSheet.getRange(1, mainSheet.getLastColumn()).getA1Notation().replace("1", "");
-  const dataRange = `'${mainSheetName}'!A2:${lastColLetter}`; // ヘッダーを除いたデータ範囲
-  const sortColLetter = String.fromCharCode(64 + sortColumnIndex);
-  const formula = `=QUERY(${dataRange}, "SELECT * ORDER BY ${sortColLetter} ASC")`;
-
-  // シートを作成
+  
   const viewSheet = ss.insertSheet(viewSheetName, 0);
   
-  // ヘッダーをコピー
-  const headers = mainSheet.getRange(1, 1, 1, mainSheet.getLastColumn());
-  headers.copyTo(viewSheet.getRange(1, 1));
-
-  // A2セルにQUERY関数をセット
-  viewSheet.getRange("A2").setFormula(formula);
-
-  // 少し待ってから後続処理を実行（QUERYの結果が反映されるのを待つ）
-  Utilities.sleep(1500);
+  // ソート済みデータを新しいシートに書き込み
+  viewSheet.getRange(1, 1, sortedData.length, headers.length).setValues(sortedData);
 
   // フィルターを作成
-  const dataRangeWithHeader = viewSheet.getRange(1, 1, viewSheet.getLastRow(), viewSheet.getLastColumn());
-  dataRangeWithHeader.createFilter();
+  viewSheet.getRange(1, 1, sortedData.length, headers.length).createFilter();
 
   // 書式と条件付き書式を適用
   applyStandardFormattingToMainSheet();
@@ -121,6 +132,74 @@ function createSortedView() {
   
   viewSheet.activate();
   ss.toast(`${viewSheetName} を作成しました。`, '完了', 5);
+}
+
+/**
+ * ビューシートに条件付き書式（色付け）を適用します。
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - 対象のビューシート
+ */
+function applyConditionalFormattingToView(sheet) {
+  const indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  const rules = [];
+
+  // 既存のルールをクリア
+  sheet.clearConditionalFormatRules();
+
+  // 1. 交互の行の背景色
+  const alternateRowRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=MOD(ROW(), 2) = 1') // 奇数行(データとしては偶数番目)
+    .setBackground(CONFIG.COLORS.ALTERNATE_ROW)
+    .setRanges([sheet.getRange(2, 1, lastRow - 1, lastCol)])
+    .build();
+  rules.push(alternateRowRule);
+
+  // 2. 各列の色付けルール
+  const colorMasters = [
+    { master: CONFIG.SHEETS.TANTOUSHA_MASTER, colIndex: indices.TANTOUSHA, colorCol: 2 },
+    { master: CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, colIndex: indices.SAGYOU_KUBUN, colorCol: 1 },
+    { master: CONFIG.SHEETS.TOIAWASE_MASTER, colIndex: indices.TOIAWASE, colorCol: 1 }
+  ];
+
+  colorMasters.forEach(item => {
+    if (!item.colIndex) return;
+    const colorMap = getColorMapFromMaster(item.master, 0, item.colorCol);
+    const range = sheet.getRange(2, item.colIndex, lastRow - 1, 1);
+    
+    for (const [key, color] of colorMap.entries()) {
+      if (key && color) {
+        rules.push(SpreadsheetApp.newConditionalFormatRule()
+          .whenTextEqualTo(key)
+          .setBackground(color)
+          .setRanges([range])
+          .build());
+      }
+    }
+  });
+  
+  // 3. 進捗列と、それに連動する管理No列の色付けルール
+  const progressColIndex = indices.PROGRESS;
+  const mgmtNoColIndex = indices.MGMT_NO;
+  if (progressColIndex && mgmtNoColIndex) {
+      const progressColorMap = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
+      const progressColLetter = String.fromCharCode(64 + progressColIndex);
+
+      for(const [key, color] of progressColorMap.entries()){
+          if(key && color){
+              rules.push(SpreadsheetApp.newConditionalFormatRule()
+                  .whenFormulaSatisfied(`=$${progressColLetter}2="${key}"`)
+                  .setBackground(color)
+                  .setRanges([
+                      sheet.getRange(2, progressColIndex, lastRow -1, 1),
+                      sheet.getRange(2, mgmtNoColIndex, lastRow -1, 1)
+                  ])
+                  .build());
+          }
+      }
+  }
+
+  sheet.setConditionalFormatRules(rules);
 }
 
 /**
@@ -140,51 +219,6 @@ function removeAllSortedViews(showMessage = true) {
     ss.toast('すべてのソートビューを削除しました。', '完了', 3);
   }
 }
-
-/**
- * ビューシートに条件付き書式（色付け）を適用します。
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - 対象のビューシート
- */
-function applyConditionalFormattingToView(sheet) {
-  const indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
-  const lastRow = sheet.getMaxRows();
-  const rules = [];
-
-  // 交互の行の背景色
-  const alternateRowRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=MOD(ROW(), 2) = 0')
-    .setBackground(CONFIG.COLORS.ALTERNATE_ROW)
-    .setRanges([sheet.getRange(2, 1, lastRow -1, sheet.getLastColumn())])
-    .build();
-  rules.push(alternateRowRule);
-
-  const colorMasters = [
-    { master: CONFIG.SHEETS.SHINCHOKU_MASTER, colIndex: indices.PROGRESS, colorCol: 1 },
-    { master: CONFIG.SHEETS.TANTOUSHA_MASTER, colIndex: indices.TANTOUSHA, colorCol: 2 },
-    { master: CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, colIndex: indices.SAGYOU_KUBUN, colorCol: 1 },
-    { master: CONFIG.SHEETS.TOIAWASE_MASTER, colIndex: indices.TOIAWASE, colorCol: 1 }
-  ];
-
-  colorMasters.forEach(item => {
-    if (!item.colIndex) return;
-    const colorMap = getColorMapFromMaster(item.master, 0, item.colorCol);
-    const range = sheet.getRange(2, item.colIndex, lastRow - 1, 1);
-    
-    for (const [key, color] of colorMap.entries()) {
-      if (key && color) {
-        const rule = SpreadsheetApp.newConditionalFormatRule()
-          .whenTextEqualTo(key)
-          .setBackground(color)
-          .setRanges([range])
-          .build();
-        rules.push(rule);
-      }
-    }
-  });
-
-  sheet.setConditionalFormatRules(rules);
-}
-
 
 // =================================================================================
 // === 書式設定、色付け、その他（既存の関数群） ===
@@ -223,7 +257,7 @@ function applyStandardFormattingToAllSheets() {
   
   allSheets.forEach(sheet => {
     try {
-      if(sheet.getName().startsWith('ソートビュー')) return; // ソートビューは別途処理
+      if(sheet.getName().startsWith('ソートビュー')) return; 
       const dataRange = sheet.getDataRange();
       if (dataRange.isBlank()) return;
       const lastCol = sheet.getLastColumn();
@@ -382,7 +416,6 @@ function colorizeSheet_(sheetObject) {
   const fullRange = sheet.getRange(startRow, 1, dataRows, lastCol);
 
   const values = fullRange.getValues();
-  const formulas = fullRange.getFormulasR1C1(); // Use R1C1 for robust formula handling
   const backgroundColors = fullRange.getBackgrounds();
 
   const mgmtNoCol = indices.MGMT_NO;
