@@ -91,13 +91,18 @@ function createSortedView() {
     return;
   }
   const mainDataRange = mainSheet.getRange(1, 1, lastRow, mainSheet.getLastColumn());
+  
+  // ★★★★★ 修正点：値と数式の両方を取得 ★★★★★
   const mainValues = mainDataRange.getValues();
   const mainFormulas = mainDataRange.getFormulas();
 
-  // 数式と値を結合（数式を優先）。これによりリンク情報が引き継がれる
-  const combinedData = mainValues.map((row, i) =>
-    row.map((cell, j) => mainFormulas[i][j] || cell)
-  );
+  // 数式が設定されているセルは数式を、そうでなければ値を採用する
+  const combinedData = mainValues.map((row, i) => {
+    return row.map((cell, j) => {
+      return mainFormulas[i][j] || cell;
+    });
+  });
+  // ★★★★★ 修正完了 ★★★★★
 
   const headers = combinedData.shift(); // ヘッダーを分離
   
@@ -184,6 +189,7 @@ function applyConditionalFormattingToView(sheet) {
   if (progressColIndex && mgmtNoColIndex) {
       const progressColorMap = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
       const progressColLetter = String.fromCharCode(64 + progressColIndex);
+      const dataRangeForRules = sheet.getRange(2, 1, lastRow - 1, lastCol);
 
       for(const [key, color] of progressColorMap.entries()){
           if(key && color){
@@ -223,20 +229,6 @@ function removeAllSortedViews(showMessage = true) {
 // =================================================================================
 // === 書式設定、色付け、その他（既存の関数群） ===
 // =================================================================================
-
-// onOpenとonEdit以外の既存の関数は変更がないため、ここでは省略します。
-// 以下の関数群は、以前のコードのままご利用ください。
-//
-// periodicMaintenance()
-// runAllManualMaintenance()
-// applyStandardFormattingToAllSheets()
-// applyStandardFormattingToMainSheet()
-// setupAllDataValidations()
-// colorizeAllSheets()
-// colorizeSheet_()
-// ... その他の既存ヘルパー関数
-
-// ▼▼▼▼▼ 以下、既存の関数（変更なし） ▼▼▼▼▼
 
 function periodicMaintenance() {
   setupAllDataValidations();
@@ -443,40 +435,7 @@ function colorizeSheet_(sheetObject) {
       }
     }
     
-    // 背景色のリセット
     const baseColor = (i % 2 !== 0) ? CONFIG.COLORS.ALTERNATE_ROW : CONFIG.COLORS.DEFAULT_BACKGROUND;
     for (let j = 0; j < lastCol; j++) {
        backgroundColors[i][j] = baseColor;
     }
-    
-    if (isDuplicate) {
-      for (let j = 0; j < lastCol; j++) {
-        backgroundColors[i][j] = DUPLICATE_COLOR;
-      }
-    } else {
-      if (progressCol) {
-        const progressValue = safeTrim(row[progressCol - 1]);
-        const progressColor = getColor(PROGRESS_COLORS, progressValue, baseColor);
-        backgroundColors[i][progressCol - 1] = progressColor;
-        if (mgmtNoCol) {
-          backgroundColors[i][mgmtNoCol - 1] = progressColor;
-        }
-      }
-
-      if (sagyouKubunCol) {
-        backgroundColors[i][sagyouKubunCol - 1] = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]), baseColor);
-      }
-
-      if (sheetObject instanceof MainSheet) {
-        if (tantoushaCol) {
-          backgroundColors[i][tantoushaCol - 1] = getColor(TANTOUSHA_COLORS, safeTrim(row[tantoushaCol - 1]), baseColor);
-        }
-        if (toiawaseCol) {
-          backgroundColors[i][toiawaseCol - 1] = getColor(TOIAWASE_COLORS, safeTrim(row[toiawaseCol - 1]), baseColor);
-        }
-      }
-    }
-  });
-
-  fullRange.setBackgrounds(backgroundColors);
-}
