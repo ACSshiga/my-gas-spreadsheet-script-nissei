@@ -1,7 +1,7 @@
 /**
  * Code.gs
  * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
- * データコピー方式による、リンク・書式対応の多機能ソートビューを実装。(改訂版)
+ * データコピー方式による、リンク・書式対応の多機能ソートビューを実装。(最終改訂版)
  */
 
 // =================================================================================
@@ -12,7 +12,7 @@ function onOpen(e) {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('カスタムメニュー')
     .addItem('ソートビューを作成', 'createSortedView')
-    .addItem('表示を更新', 'refreshSortedView') // 更新機能を追加
+    .addItem('表示を更新', 'refreshSortedView') // 更新機能を明確にメニューに追加
     .addItem('ソートビューを全て削除', 'removeAllSortedViews')
     .addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
@@ -65,7 +65,7 @@ function onEdit(e) {
 // =================================================================================
 
 /**
- * ソートビューを更新します。
+ * ソートビューを更新します。古いビューを全て削除し、新しいビューを作成します。
  */
 function refreshSortedView() {
     SpreadsheetApp.getActiveSpreadsheet().toast('ビューを更新しています...', '処理中', 5);
@@ -74,7 +74,7 @@ function refreshSortedView() {
 }
 
 /**
- * メインシートのデータをコピー・ソートし、新しい「ソートビュー」シートを作成します。
+ * メインシートのデータを数式ごとコピー・ソートし、新しい「ソートビュー」シートを作成します。
  */
 function createSortedView() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -110,7 +110,7 @@ function createSortedView() {
 
   // ★★★★★ 修正点：copyToで数式ごと完全コピー ★★★★★
   const sourceRange = mainSheet.getRange(1, 1, lastRow, mainSheet.getLastColumn());
-  sourceRange.copyTo(viewSheet.getRange(1, 1));
+  sourceRange.copyTo(viewSheet.getRange(1, 1), {contentsOnly: false}); // contentsOnly:falseで数式や書式もコピー
   // ★★★★★ 修正完了 ★★★★★
 
   // コピーしたデータ範囲に対して並べ替えを実行
@@ -192,7 +192,7 @@ function colorizeAllSheets() {
 
 
 /**
- * ★★★★★ 修正点：この関数は背景色のみを設定し、数式を上書きしない ★★★★★
+ * ★★★★★ 修正点：この関数は背景色のみを設定し、数式を絶対に上書きしない ★★★★★
  */
 function colorizeSheet_(sheetObject) {
   const sheet = sheetObject.getSheet();
@@ -206,7 +206,12 @@ function colorizeSheet_(sheetObject) {
   const range = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol);
   
   const values = range.getValues();
-  const backgroundColors = range.getBackgrounds();
+  const backgroundColors = []; // 新しい背景色配列を初期化
+
+  const PROGRESS_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
+  const TANTOUSHA_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TANTOUSHA_MASTER, 0, 2);
+  const SAGYOU_KUBUN_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, 0, 1);
+  const TOIAWASE_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TOIAWASE_MASTER, 0, 1);
 
   const mgmtNoCol = indices.MGMT_NO;
   const progressCol = indices.PROGRESS;
@@ -214,42 +219,42 @@ function colorizeSheet_(sheetObject) {
   const toiawaseCol = indices.TOIAWASE;
   const sagyouKubunCol = indices.SAGYOU_KUBUN;
 
-  const PROGRESS_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
-  const TANTOUSHA_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TANTOUSHA_MASTER, 0, 2);
-  const SAGYOU_KUBUN_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, 0, 1);
-  const TOIAWASE_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TOIAWASE_MASTER, 0, 1);
-
   values.forEach((row, i) => {
+    const rowColors = [];
     const baseColor = (i % 2 === 0) ? CONFIG.COLORS.DEFAULT_BACKGROUND : CONFIG.COLORS.ALTERNATE_ROW;
     
     // 全列の基本色を設定
     for (let j = 0; j < lastCol; j++) {
-      backgroundColors[i][j] = baseColor;
+      rowColors[j] = baseColor;
     }
 
     // 進捗に応じた色付け (管理Noにも適用)
     if (progressCol) {
       const progressValue = safeTrim(row[progressCol - 1]);
       const progressColor = getColor(PROGRESS_COLORS, progressValue, baseColor);
-      backgroundColors[i][progressCol - 1] = progressColor;
+      rowColors[progressCol - 1] = progressColor;
       if (mgmtNoCol) {
-        backgroundColors[i][mgmtNoCol - 1] = progressColor;
+        rowColors[mgmtNoCol - 1] = progressColor;
       }
     }
 
     // 各マスターに応じた色付け
     if (sagyouKubunCol) {
       const value = safeTrim(row[sagyouKubunCol - 1]);
-      backgroundColors[i][sagyouKubunCol - 1] = getColor(SAGYOU_KUBUN_COLORS, value, baseColor);
+      const color = getColor(SAGYOU_KUBUN_COLORS, value, baseColor);
+      if (color !== baseColor) rowColors[sagyouKubunCol - 1] = color;
     }
     if (tantoushaCol) {
        const value = safeTrim(row[tantoushaCol - 1]);
-       backgroundColors[i][tantoushaCol - 1] = getColor(TANTOUSHA_COLORS, value, baseColor);
+       const color = getColor(TANTOUSHA_COLORS, value, baseColor);
+       if (color !== baseColor) rowColors[tantoushaCol - 1] = color;
     }
     if (toiawaseCol) {
        const value = safeTrim(row[toiawaseCol - 1]);
-       backgroundColors[i][toiawaseCol - 1] = getColor(TOIAWASE_COLORS, value, baseColor);
+       const color = getColor(TOIAWASE_COLORS, value, baseColor);
+       if (color !== baseColor) rowColors[toiawaseCol - 1] = color;
     }
+    backgroundColors.push(rowColors);
   });
 
   // 背景色のみを更新する
@@ -259,7 +264,6 @@ function colorizeSheet_(sheetObject) {
 // =================================================================================
 // === 既存のヘルパー関数群（変更なし） ===
 // =================================================================================
-// (periodicMaintenance, runAllManualMaintenance, applyStandardFormattingToAllSheets, etc.)
 // ... 以下のコードは変更がないため、そのまま貼り付けてください ...
 function periodicMaintenance() {
   setupAllDataValidations();
