@@ -439,3 +439,35 @@ function colorizeSheet_(sheetObject) {
     for (let j = 0; j < lastCol; j++) {
        backgroundColors[i][j] = baseColor;
     }
+    
+    if (isDuplicate) {
+      for (let j = 0; j < lastCol; j++) {
+        backgroundColors[i][j] = DUPLICATE_COLOR;
+      }
+    } else {
+      if (progressCol) {
+        const progressValue = safeTrim(row[progressCol - 1]);
+        const progressColor = getColor(PROGRESS_COLORS, progressValue, baseColor);
+        backgroundColors[i][progressCol - 1] = progressColor;
+        if (mgmtNoCol) {
+          backgroundColors[i][mgmtNoCol - 1] = progressColor;
+        }
+      }
+
+      if (sagyouKubunCol) {
+        backgroundColors[i][sagyouKubunCol - 1] = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]), baseColor);
+      }
+
+      if (sheetObject instanceof MainSheet) {
+        if (tantoushaCol) {
+          backgroundColors[i][tantoushaCol - 1] = getColor(TANTOUSHA_COLORS, safeTrim(row[tantoushaCol - 1]), baseColor);
+        }
+        if (toiawaseCol) {
+          backgroundColors[i][toiawaseCol - 1] = getColor(TOIAWASE_COLORS, safeTrim(row[toiawaseCol - 1]), baseColor);
+        }
+      }
+    }
+  });
+
+  fullRange.setBackgrounds(backgroundColors);
+}
