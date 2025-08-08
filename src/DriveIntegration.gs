@@ -1,7 +1,7 @@
 /**
  * DriveIntegration.gs
  * Google Driveとの連携機能（フォルダ作成、バックアップ）を管理します。
- * (管理表の作成タイミングを分離)
+ * (管理表の「作成」と「書き込み」のタイミングを分離)
  */
 
 // =================================================================================
@@ -24,20 +24,24 @@ function bulkCreateMaterialFolders() {
     }
 
     const lastRow = mainSheet.getLastRow();
-    if (lastRow < mainSheet.startRow) return;
+    if (lastRow < mainSheet.startRow) {
+      ss.toast("データがありません。");
+      return;
+    }
 
     const range = sheet.getRange(mainSheet.startRow, 1, lastRow - mainSheet.startRow + 1, mainSheet.getLastColumn());
     const values = range.getValues();
     const formulas = range.getFormulas();
 
+    // 手順1: リンクが未作成のユニークな「機番」と「機種」を収集
     const uniqueKibans = new Set();
     const uniqueModels = new Set();
     values.forEach((row, i) => {
-      if (!formulas[i][indices.KIBAN_URL - 1]) {
+      if (!formulas[i][indices.KIBAN_URL - 1] && String(row[indices.KIBAN_URL - 1]).trim() === '') {
         const kiban = String(row[indices.KIBAN - 1]).trim();
         if (kiban) uniqueKibans.add(kiban);
       }
-      if (!formulas[i][indices.SERIES_URL - 1]) {
+      if (!formulas[i][indices.SERIES_URL - 1] && String(row[indices.SERIES_URL - 1]).trim() === '') {
         const model = String(row[indices.MODEL - 1]).trim();
         if (model) {
           const match = model.match(/^[A-Za-z]+[0-9]+/);
@@ -46,11 +50,16 @@ function bulkCreateMaterialFolders() {
       }
     });
 
+    // 手順2: フォルダを一括作成し、URLをマップに保存 & 空の管理表を作成
     const kibanUrlMap = new Map();
     uniqueKibans.forEach(kiban => {
       const folderResult = getOrCreateFolder_(kiban, CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT);
       if (folderResult && folderResult.folder) {
         kibanUrlMap.set(kiban, folderResult.folder.getUrl());
+        // フォルダが「新規作成」された場合のみ、空の管理シートも生成する
+        if (folderResult.isNew) {
+           createBlankManagementSheet_(folderResult.folder, kiban);
+        }
       }
     });
 
@@ -62,7 +71,11 @@ function bulkCreateMaterialFolders() {
       }
     });
     
-    const outputData = values.map((row, i) => row.map((cell, j) => formulas[i][j] || cell));
+    // 手順3: 元のデータを保持し、変更箇所だけを更新する安全な方法
+    const outputData = values.map((row, i) =>
+      row.map((cell, j) => formulas[i][j] || cell)
+    );
+
     let modified = false;
     values.forEach((row, i) => {
       const kiban = String(row[indices.KIBAN - 1]).trim();
@@ -81,6 +94,7 @@ function bulkCreateMaterialFolders() {
       }
     });
 
+    // 手順4: 変更があった場合のみ、シートに書き戻す
     if (modified) {
       range.setValues(outputData);
       ss.toast("資料フォルダの作成とリンク設定が完了しました。");
@@ -95,69 +109,28 @@ function bulkCreateMaterialFolders() {
 }
 
 /**
- * テンプレートのスプレッドシートをコピーし、情報を書き込んでフォルダに保存する
- * (エラー発生時に最大4回まで自動で再試行する機能を追加)
+ * 中身が空の管理表スプレッドシートを作成する
  */
-function createManagementSheet_(targetFolder, kiban, model) {
+function createBlankManagementSheet_(targetFolder, kiban) {
   const templateId = CONFIG.TEMPLATES.MANAGEMENT_SHEET_TEMPLATE_ID;
   if (!templateId || templateId.includes("...")) {
     Logger.log("テンプレートIDがConfig.gsに設定されていません。");
     return;
   }
-
   try {
     const templateFile = DriveApp.getFileById(templateId);
     const newFileName = `${kiban}盤配指示図出図管理表`;
     
-    // 重複作成を防止
     const existingFiles = targetFolder.getFilesByName(newFileName);
     if (existingFiles.hasNext()) {
-      Logger.log(`管理表「${newFileName}」は既に存在するため、作成をスキップします。`);
+      Logger.log(`管理表「${newFileName}」は既に存在するため作成をスキップします。`);
       return;
     }
-
-    const newFile = templateFile.makeCopy(newFileName, targetFolder);
-    const newFileId = newFile.getId();
-
-    let success = false;
-    let attempts = 4;
-    let waitTime = 2000;
-
-    Utilities.sleep(2000);
-
-    for (let i = 0; i < attempts; i++) {
-      try {
-        const newSpreadsheet = SpreadsheetApp.openById(newFileId);
-        const sheet = newSpreadsheet.getSheets()[0];
-        
-        sheet.getRange("B4").setValue("機種：" + model);
-        sheet.getRange("B5").setValue("製番：" + kiban);
-        sheet.getDataRange().setFontFamily("Arial").setFontSize(11);
-        SpreadsheetApp.flush();
-        
-        success = true;
-        Logger.log(`管理表「${newFileName}」をフォルダ「${targetFolder.getName()}」に作成し、編集しました。`);
-        SpreadsheetApp.getActiveSpreadsheet().toast(`管理表「${newFileName}」を作成しました。`);
-        break;
-      } catch (e) {
-        if (e.message.includes("サービスに接続できなくなりました")) {
-          Logger.log(`試行 ${i + 1}/${attempts}: スプレッドシートサービスへの接続に失敗。${waitTime / 1000}秒後に再試行します。`);
-          Utilities.sleep(waitTime);
-          waitTime *= 2;
-        } else {
-          throw e;
-        }
-      }
-    }
-
-    if (!success) {
-      Logger.log(`${attempts}回の再試行後も管理表の編集に失敗しました。`);
-      SpreadsheetApp.getActiveSpreadsheet().toast("管理表の編集に失敗しました。時間をおいて再度お試しください。");
-    }
-
+    
+    templateFile.makeCopy(newFileName, targetFolder);
+    Logger.log(`空の管理表「${newFileName}」をフォルダ「${targetFolder.getName()}」に作成しました。`);
   } catch (e) {
-    Logger.log(`管理表の作成または編集中にエラーが発生しました: ${e.message}`);
-    SpreadsheetApp.getActiveSpreadsheet().toast("管理表の作成中にエラーが発生しました。ログを確認してください。");
+    Logger.log(`管理表の作成中にエラー: ${e.message}`);
   }
 }
 
@@ -189,11 +162,14 @@ function createWeeklyBackup() {
     if (!CONFIG.FOLDERS.BACKUP_PARENT) {
       throw new Error("バックアップ用フォルダIDが設定されていません。");
     }
+
     const originalName = ss.getName();
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), DATE_FORMATS.BACKUP_TIMESTAMP);
     const backupFileName = `${CONFIG.BACKUP.PREFIX}${originalName}_${timestamp}`;
     const parentFolder = DriveApp.getFolderById(CONFIG.FOLDERS.BACKUP_PARENT);
+
     DriveApp.getFileById(ss.getId()).makeCopy(backupFileName, parentFolder);
+
     const files = parentFolder.getFiles();
     const backupFiles = [];
     while (files.hasNext()) {
@@ -202,6 +178,7 @@ function createWeeklyBackup() {
         backupFiles.push(file);
       }
     }
+
     if (backupFiles.length > CONFIG.BACKUP.KEEP_COUNT) {
       backupFiles.sort((a, b) => a.getDateCreated() - b.getDateCreated());
       const toDeleteCount = backupFiles.length - CONFIG.BACKUP.KEEP_COUNT;

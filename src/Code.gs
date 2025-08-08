@@ -1,7 +1,7 @@
 /**
  * Code.gs
  * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
- * (データ保護とエラーへのリトライ機能を強化した最終改訂版)
+ * (管理表の作成タイミングを「仕掛かり日」入力時に変更)
  */
 
 // =================================================================================
@@ -49,18 +49,31 @@ function onEdit(e) {
       const mainSheet = new MainSheet();
       const editedCol = e.range.getColumn();
       const editedRow = e.range.getRow();
+      
+      // 編集された行のデータを取得
+      const editedRowValues = mainSheet.getSheet().getRange(editedRow, 1, 1, mainSheet.getSheet().getLastColumn()).getValues()[0];
+      const kiban = editedRowValues[mainSheet.indices.KIBAN - 1];
+      const model = editedRowValues[mainSheet.indices.MODEL - 1];
 
       if (editedCol === mainSheet.indices.TANTOUSHA) {
         ss.toast('担当者の変更を検出しました。関連シートを同期します...', '同期中', 5);
         syncMainToAllInputSheets();
         colorizeAllSheets();
-        ss.toast('同期処理が完了しました。', '完了', 3);
-      } else if (editedCol === mainSheet.indices.COMPLETE_DATE && editedRow >= mainSheet.startRow) {
-        const kiban = mainSheet.getSheet().getRange(editedRow, mainSheet.indices.KIBAN).getValue();
+      } 
+      // 「仕掛かり日」が入力された時の処理
+      else if (editedCol === mainSheet.indices.START_DATE && editedRow >= mainSheet.startRow) {
+        if (kiban && model && e.value) { // 仕掛かり日に日付が入力された場合
+          ss.toast('管理表に機種・製番を書き込みます...', '処理中', 3);
+          updateManagementSheet({ kiban: kiban, model: model });
+        }
+        colorizeAllSheets();
+      } 
+      // 「完了日」が入力された時の処理
+      else if (editedCol === mainSheet.indices.COMPLETE_DATE && editedRow >= mainSheet.startRow) {
         const completionDate = e.value;
         if (kiban && completionDate) {
           ss.toast('完了日を顧客用管理表に同期します...', '同期中', 3);
-          syncCompletionDateToManagementSheet(kiban, new Date(completionDate));
+          updateManagementSheet({ kiban: kiban, completionDate: new Date(completionDate) });
         }
         colorizeAllSheets();
       } else {
@@ -68,10 +81,8 @@ function onEdit(e) {
       }
 
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-      ss.toast(`${sheetName}の変更を検出しました。メインシートへ集計します...`, '集計中', 5);
       syncInputToMain(sheetName, e.range);
       colorizeAllSheets();
-      ss.toast('集計処理が完了しました。', '完了', 3);
     }
   } catch (error) {
     Logger.log(error.stack);
@@ -82,58 +93,60 @@ function onEdit(e) {
 }
 
 /**
- * メインシートの完了日を、対応する機番フォルダ内の管理シートに同期する
- * (エラー発生時に最大4回まで自動で再試行する機能を追加)
+ * 顧客用管理表に情報を書き込む（リトライ機能付き）
+ * @param {object} data - {kiban, model, completionDate} のいずれかを含むオブジェクト
  */
-function syncCompletionDateToManagementSheet(kiban, date) {
+function updateManagementSheet(data) {
   try {
     const parentFolder = DriveApp.getFolderById(CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT);
-    const kibanFolders = parentFolder.getFoldersByName(kiban);
+    const kibanFolders = parentFolder.getFoldersByName(data.kiban);
 
     if (kibanFolders.hasNext()) {
       const kibanFolder = kibanFolders.next();
-      const fileName = `${kiban}盤配指示図出図管理表`;
+      const fileName = `${data.kiban}盤配指示図出図管理表`;
       const files = kibanFolder.getFilesByName(fileName);
 
       if (files.hasNext()) {
-        const file = files.next();
-        const fileId = file.getId();
-        const formattedDate = Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy/MM/dd");
-
+        const fileId = files.next().getId();
+        
         let success = false;
-        let attempts = 4; // 再試行回数を4回に増加
-        let waitTime = 2000; // 初回の待機時間を2秒に設定
+        let attempts = 4, waitTime = 2000;
 
         for (let i = 0; i < attempts; i++) {
           try {
             const spreadsheet = SpreadsheetApp.openById(fileId);
             const sheet = spreadsheet.getSheets()[0];
-            sheet.getRange("B7").setValue("完了日：" + formattedDate);
+            
+            // 仕掛かり日入力時の処理
+            if (data.model) {
+              sheet.getRange("B4").setValue("機種：" + data.model);
+              sheet.getRange("B5").setValue("製番：" + data.kiban);
+              sheet.getDataRange().setFontFamily("Arial").setFontSize(11);
+            }
+            // 完了日入力時の処理
+            if (data.completionDate) {
+              const formattedDate = Utilities.formatDate(data.completionDate, Session.getScriptTimeZone(), "yyyy/MM/dd");
+              sheet.getRange("B7").setValue("完了日：" + formattedDate);
+            }
+            
             SpreadsheetApp.flush();
             success = true;
-            Logger.log(`管理表「${fileName}」の完了日を更新しました。`);
-            break; // 成功したのでループを抜ける
+            Logger.log(`管理表「${fileName}」を更新しました。`);
+            break;
           } catch (e) {
             if (e.message.includes("サービスに接続できなくなりました")) {
-              Logger.log(`試行 ${i + 1}/${attempts}: 完了日同期中に接続エラー。${waitTime / 1000}秒後に再試行します。`);
+              Logger.log(`試行 ${i + 1}/${attempts}: 管理表更新中に接続エラー。${waitTime / 1000}秒後に再試行します。`);
               Utilities.sleep(waitTime);
               waitTime *= 2;
-            } else {
-              throw e;
-            }
+            } else { throw e; }
           }
         }
-        if (!success) {
-          Logger.log(`${attempts}回の再試行後も完了日の同期に失敗しました。`);
-        }
-      } else {
-        Logger.log(`フォルダ「${kiban}」内に管理表「${fileName}」が見つかりませんでした。`);
-      }
-    } else {
-      Logger.log(`機番フォルダ「${kiban}」が見つかりませんでした。`);
-    }
+        if (!success) Logger.log(`管理表「${fileName}」の更新に失敗しました。`);
+
+      } else { Logger.log(`管理表「${fileName}」が見つかりません。`); }
+    } else { Logger.log(`機番フォルダ「${data.kiban}」が見つかりません。`); }
   } catch (e) {
-    Logger.log(`完了日の同期中にエラーが発生しました: ${e.message}`);
+    Logger.log(`管理表の更新中にエラー: ${e.message}`);
   }
 }
 
@@ -142,67 +155,40 @@ function syncCompletionDateToManagementSheet(kiban, date) {
 // === ソートビュー（データコピー方式）機能 ===
 // =================================================================================
 
-/**
- * ソートビューを更新します。
- */
 function refreshSortedView() {
     SpreadsheetApp.getActiveSpreadsheet().toast('ビューを更新しています...', '処理中', 5);
     removeAllSortedViews(false);
     createSortedView();
 }
 
-/**
- * メインシートのデータを数式ごとコピー・ソートし、新しい「ソートビュー」シートを作成します。
- */
 function createSortedView() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
-  if (!mainSheet) {
-    SpreadsheetApp.getUi().alert('メインシートが見つかりません。');
-    return;
-  }
-
+  if (!mainSheet) return;
   const mainIndices = getColumnIndices(mainSheet, MAIN_SHEET_HEADERS);
   const sortColumnIndex = mainIndices.MGMT_NO;
-  if (!sortColumnIndex) {
-      SpreadsheetApp.getUi().alert('ソートキーとなる「管理No」列が見つかりません。');
-      return;
-  }
-
+  if (!sortColumnIndex) return;
   const lastRow = mainSheet.getLastRow();
   const dataStartRow = CONFIG.DATA_START_ROW.MAIN;
-  if (lastRow < dataStartRow) {
-    SpreadsheetApp.getUi().alert('メインシートにデータがありません。');
-    return;
-  }
-
+  if (lastRow < dataStartRow) return;
   let viewSheetName = 'ソートビュー';
   let counter = 2;
   while (ss.getSheetByName(viewSheetName)) {
     viewSheetName = `ソートビュー (${counter})`;
     counter++;
   }
-  
   const viewSheet = ss.insertSheet(viewSheetName, 0);
-
   const sourceRange = mainSheet.getRange(1, 1, lastRow, mainSheet.getLastColumn());
   sourceRange.copyTo(viewSheet.getRange(1, 1), {contentsOnly: false});
-
   const viewRangeToSort = viewSheet.getRange(dataStartRow, 1, viewSheet.getLastRow() - (dataStartRow - 1), viewSheet.getLastColumn());
   viewRangeToSort.sort({column: sortColumnIndex, ascending: true});
-
   viewSheet.getRange(1, 1, viewSheet.getLastRow(), viewSheet.getLastColumn()).createFilter();
   applyStandardFormattingToMainSheet();
-  
   colorizeSheet_(new ViewSheet(viewSheet));
-
   viewSheet.activate();
   ss.toast(`${viewSheetName} を作成しました。`, '完了', 5);
 }
 
-/**
- * すべてのソートビューを削除します。
- */
 function removeAllSortedViews(showMessage = true) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let deleted = false;
@@ -212,10 +198,8 @@ function removeAllSortedViews(showMessage = true) {
       deleted = true;
     }
   });
-
   const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
   if (mainSheet) mainSheet.activate();
-  
   if (showMessage && deleted) {
     ss.toast('すべてのソートビューを削除しました。', '完了', 3);
   }
@@ -236,70 +220,44 @@ class ViewSheet {
 }
 
 function colorizeAllSheets() {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    ss.getSheets().forEach(sheet => {
-      const sheetName = sheet.getName();
-      try {
-        if (sheetName === CONFIG.SHEETS.MAIN) {
-          colorizeSheet_(new MainSheet());
-        } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-          const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
-          colorizeSheet_(new InputSheet(tantoushaName));
-        } else if (sheetName.startsWith('ソートビュー')) {
-          colorizeSheet_(new ViewSheet(sheet));
-        }
-      } catch (e) {
-        Logger.log(`シート「${sheetName}」の色付け処理中にエラー: ${e.message}`);
-      }
-    });
-  } catch (error) {
-    Logger.log(`色付け処理でエラーが発生しました: ${error.stack}`);
-  }
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.getSheets().forEach(sheet => {
+    const sheetName = sheet.getName();
+    try {
+      if (sheetName === CONFIG.SHEETS.MAIN) colorizeSheet_(new MainSheet());
+      else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) colorizeSheet_(new InputSheet(sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '')));
+      else if (sheetName.startsWith('ソートビュー')) colorizeSheet_(new ViewSheet(sheet));
+    } catch (e) {
+      Logger.log(`シート「${sheetName}」の色付け処理中にエラー: ${e.message}`);
+    }
+  });
 }
 
 function colorizeSheet_(sheetObject) {
   const sheet = sheetObject.getSheet();
   const startRow = sheetObject.startRow;
   const lastRow = sheet.getLastRow();
-
   if (lastRow < startRow) return;
-
   const indices = sheetObject.indices;
   const lastCol = sheet.getLastColumn();
   const range = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol);
-  
   const values = range.getValues();
   const backgroundColors = [];
-
   const PROGRESS_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
   const TANTOUSHA_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TANTOUSHA_MASTER, 0, 2);
   const SAGYOU_KUBUN_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, 0, 1);
   const TOIAWASE_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TOIAWASE_MASTER, 0, 1);
-
-  const mgmtNoCol = indices.MGMT_NO;
-  const progressCol = indices.PROGRESS;
-  const tantoushaCol = indices.TANTOUSHA;
-  const toiawaseCol = indices.TOIAWASE;
-  const sagyouKubunCol = indices.SAGYOU_KUBUN;
-
+  const mgmtNoCol = indices.MGMT_NO, progressCol = indices.PROGRESS, tantoushaCol = indices.TANTOUSHA, toiawaseCol = indices.TOIAWASE, sagyouKubunCol = indices.SAGYOU_KUBUN;
   values.forEach((row, i) => {
     const rowColors = [];
     const baseColor = (i % 2 === 0) ? CONFIG.COLORS.DEFAULT_BACKGROUND : CONFIG.COLORS.ALTERNATE_ROW;
-    
-    for (let j = 0; j < lastCol; j++) {
-      rowColors[j] = baseColor;
-    }
-
+    for (let j = 0; j < lastCol; j++) rowColors[j] = baseColor;
     if (progressCol) {
       const progressValue = safeTrim(row[progressCol - 1]);
       const progressColor = getColor(PROGRESS_COLORS, progressValue, baseColor);
       rowColors[progressCol - 1] = progressColor;
-      if (mgmtNoCol) {
-        rowColors[mgmtNoCol - 1] = progressColor;
-      }
+      if (mgmtNoCol) rowColors[mgmtNoCol - 1] = progressColor;
     }
-
     if (sagyouKubunCol) {
       const value = safeTrim(row[sagyouKubunCol - 1]);
       const color = getColor(SAGYOU_KUBUN_COLORS, value, baseColor);
@@ -317,7 +275,6 @@ function colorizeSheet_(sheetObject) {
     }
     backgroundColors.push(rowColors);
   });
-
   range.setBackgrounds(backgroundColors);
 }
 
