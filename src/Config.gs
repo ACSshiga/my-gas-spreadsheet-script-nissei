@@ -10,6 +10,12 @@ const CONFIG = {
     IMPORT_SOURCE_FOLDER: "16RqfEDRYnoq09Xu2mmM3e8wQbqulOh56", // 申請書インポート用
     PROCESSED_FOLDER:     "1T5W9vYZKoZDtD-6_clPGRUolgqpK4Zgg"  // 処理済み申請書
   },
+  // ▼▼▼▼▼ このセクションを新しく追加 ▼▼▼▼▼
+  TEMPLATES: {
+    // 顧客用管理表のテンプレート（スプレッドシート）のID
+    MANAGEMENT_SHEET_TEMPLATE_ID: "1BXLGtgjQelZVOUpoRrbM0bUqjhNlA1TW" 
+  },
+  // ▲▲▲▲▲ ここまで追加 ▲▲▲▲▲
   SHEETS: {
     MAIN:             "メインシート",
     INPUT_PREFIX:     "工数_",

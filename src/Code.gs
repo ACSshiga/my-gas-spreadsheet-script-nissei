@@ -1,7 +1,7 @@
 /**
  * Code.gs
  * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
- * データコピー方式による、リンク・書式対応の多機能ソートビューを実装。(最終改訂版)
+ * (完了日の同期機能を追加)
  */
 
 // =================================================================================
@@ -12,7 +12,7 @@ function onOpen(e) {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('カスタムメニュー')
     .addItem('ソートビューを作成', 'createSortedView')
-    .addItem('表示を更新', 'refreshSortedView') // 更新機能を明確にメニューに追加
+    .addItem('表示を更新', 'refreshSortedView') 
     .addItem('ソートビューを全て削除', 'removeAllSortedViews')
     .addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
@@ -27,6 +27,9 @@ function onOpen(e) {
     .addToUi();
 }
 
+/**
+ * onEdit: 編集イベントを処理する司令塔
+ */
 function onEdit(e) {
   if (!e || !e.source || !e.range) return;
   const lock = LockService.getScriptLock();
@@ -43,14 +46,32 @@ function onEdit(e) {
     const sheetName = sheet.getName();
 
     if (sheetName === CONFIG.SHEETS.MAIN) {
-      colorizeSheet_(new MainSheet()); // メインシートの色付けのみ実行
       const mainSheet = new MainSheet();
-      if (e.range.getColumn() === mainSheet.indices.TANTOUSHA) {
+      const editedCol = e.range.getColumn();
+      const editedRow = e.range.getRow();
+
+      if (editedCol === mainSheet.indices.TANTOUSHA) {
+        ss.toast('担当者の変更を検出しました。関連シートを同期します...', '同期中', 5);
         syncMainToAllInputSheets();
+        colorizeAllSheets();
+        ss.toast('同期処理が完了しました。', '完了', 3);
+      } else if (editedCol === mainSheet.indices.COMPLETE_DATE && editedRow >= mainSheet.startRow) {
+        const kiban = mainSheet.getSheet().getRange(editedRow, mainSheet.indices.KIBAN).getValue();
+        const completionDate = e.value;
+        if (kiban && completionDate) {
+          ss.toast('完了日を顧客用管理表に同期します...', '同期中', 3);
+          syncCompletionDateToManagementSheet(kiban, new Date(completionDate));
+        }
+        colorizeAllSheets();
+      } else {
+        colorizeAllSheets();
       }
+
     } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+      ss.toast(`${sheetName}の変更を検出しました。メインシートへ集計します...`, '集計中', 5);
       syncInputToMain(sheetName, e.range);
-      colorizeSheet_(new InputSheet(sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '')));
+      colorizeAllSheets();
+      ss.toast('集計処理が完了しました。', '完了', 3);
     }
   } catch (error) {
     Logger.log(error.stack);
@@ -60,16 +81,51 @@ function onEdit(e) {
   }
 }
 
+/**
+ * メインシートの完了日を、対応する機番フォルダ内の管理シートに同期する
+ */
+function syncCompletionDateToManagementSheet(kiban, date) {
+  try {
+    const parentFolder = DriveApp.getFolderById(CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT);
+    const kibanFolders = parentFolder.getFoldersByName(kiban);
+
+    if (kibanFolders.hasNext()) {
+      const kibanFolder = kibanFolders.next();
+      const fileName = `${kiban}盤配指示図出図管理表`;
+      const files = kibanFolder.getFilesByName(fileName);
+
+      if (files.hasNext()) {
+        const file = files.next();
+        const spreadsheet = SpreadsheetApp.openById(file.getId());
+        const sheet = spreadsheet.getSheets()[0];
+        
+        const formattedDate = Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy/MM/dd");
+        sheet.getRange("B7").setValue("完了日：" + formattedDate); // B7セルに完了日を設定
+
+        SpreadsheetApp.flush();
+        Logger.log(`管理表「${fileName}」の完了日を更新しました。`);
+      } else {
+        Logger.log(`フォルダ「${kiban}」内に管理表「${fileName}」が見つかりませんでした。`);
+      }
+    } else {
+      Logger.log(`機番フォルダ「${kiban}」が見つかりませんでした。`);
+    }
+  } catch (e) {
+    Logger.log(`完了日の同期中にエラーが発生しました: ${e.message}`);
+  }
+}
+
+
 // =================================================================================
 // === ソートビュー（データコピー方式）機能 ===
 // =================================================================================
 
 /**
- * ソートビューを更新します。古いビューを全て削除し、新しいビューを作成します。
+ * ソートビューを更新します。
  */
 function refreshSortedView() {
     SpreadsheetApp.getActiveSpreadsheet().toast('ビューを更新しています...', '処理中', 5);
-    removeAllSortedViews(false); // メッセージなしで全ビューを削除
+    removeAllSortedViews(false);
     createSortedView();
 }
 
@@ -98,7 +154,6 @@ function createSortedView() {
     return;
   }
 
-  // 新しいビューシートの名前を決定（連番処理）
   let viewSheetName = 'ソートビュー';
   let counter = 2;
   while (ss.getSheetByName(viewSheetName)) {
@@ -108,20 +163,15 @@ function createSortedView() {
   
   const viewSheet = ss.insertSheet(viewSheetName, 0);
 
-  // ★★★★★ 修正点：copyToで数式ごと完全コピー ★★★★★
   const sourceRange = mainSheet.getRange(1, 1, lastRow, mainSheet.getLastColumn());
-  sourceRange.copyTo(viewSheet.getRange(1, 1), {contentsOnly: false}); // contentsOnly:falseで数式や書式もコピー
-  // ★★★★★ 修正完了 ★★★★★
+  sourceRange.copyTo(viewSheet.getRange(1, 1), {contentsOnly: false});
 
-  // コピーしたデータ範囲に対して並べ替えを実行
   const viewRangeToSort = viewSheet.getRange(dataStartRow, 1, viewSheet.getLastRow() - (dataStartRow - 1), viewSheet.getLastColumn());
   viewRangeToSort.sort({column: sortColumnIndex, ascending: true});
 
-  // フィルターと書式を適用
   viewSheet.getRange(1, 1, viewSheet.getLastRow(), viewSheet.getLastColumn()).createFilter();
-  applyStandardFormattingToMainSheet(); // ヘッダー書式とウィンドウ枠固定
+  applyStandardFormattingToMainSheet();
   
-  // 色付け処理
   colorizeSheet_(new ViewSheet(viewSheet));
 
   viewSheet.activate();
@@ -153,9 +203,6 @@ function removeAllSortedViews(showMessage = true) {
 // === 色付け処理とヘルパークラス ===
 // =================================================================================
 
-/**
- * ソートビューシートを扱うための簡易クラス
- */
 class ViewSheet {
   constructor(sheet) {
     this.sheet = sheet;
@@ -165,7 +212,6 @@ class ViewSheet {
   getSheet() { return this.sheet; }
   getLastRow() { return this.sheet.getLastRow(); }
 }
-
 
 function colorizeAllSheets() {
   try {
@@ -190,10 +236,6 @@ function colorizeAllSheets() {
   }
 }
 
-
-/**
- * ★★★★★ 修正点：この関数は背景色のみを設定し、数式を絶対に上書きしない ★★★★★
- */
 function colorizeSheet_(sheetObject) {
   const sheet = sheetObject.getSheet();
   const startRow = sheetObject.startRow;
@@ -206,7 +248,7 @@ function colorizeSheet_(sheetObject) {
   const range = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol);
   
   const values = range.getValues();
-  const backgroundColors = []; // 新しい背景色配列を初期化
+  const backgroundColors = [];
 
   const PROGRESS_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
   const TANTOUSHA_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TANTOUSHA_MASTER, 0, 2);
@@ -223,12 +265,10 @@ function colorizeSheet_(sheetObject) {
     const rowColors = [];
     const baseColor = (i % 2 === 0) ? CONFIG.COLORS.DEFAULT_BACKGROUND : CONFIG.COLORS.ALTERNATE_ROW;
     
-    // 全列の基本色を設定
     for (let j = 0; j < lastCol; j++) {
       rowColors[j] = baseColor;
     }
 
-    // 進捗に応じた色付け (管理Noにも適用)
     if (progressCol) {
       const progressValue = safeTrim(row[progressCol - 1]);
       const progressColor = getColor(PROGRESS_COLORS, progressValue, baseColor);
@@ -238,7 +278,6 @@ function colorizeSheet_(sheetObject) {
       }
     }
 
-    // 各マスターに応じた色付け
     if (sagyouKubunCol) {
       const value = safeTrim(row[sagyouKubunCol - 1]);
       const color = getColor(SAGYOU_KUBUN_COLORS, value, baseColor);
@@ -257,14 +296,12 @@ function colorizeSheet_(sheetObject) {
     backgroundColors.push(rowColors);
   });
 
-  // 背景色のみを更新する
   range.setBackgrounds(backgroundColors);
 }
 
 // =================================================================================
 // === 既存のヘルパー関数群（変更なし） ===
 // =================================================================================
-// ... 以下のコードは変更がないため、そのまま貼り付けてください ...
 function periodicMaintenance() {
   setupAllDataValidations();
 }

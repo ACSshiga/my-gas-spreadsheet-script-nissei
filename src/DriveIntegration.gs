@@ -1,7 +1,7 @@
 /**
  * DriveIntegration.gs
  * Google Driveとの連携機能（フォルダ作成、バックアップ）を管理します。
- * (効率化・安定化・詳細ログ出力 改訂版)
+ * (顧客用管理シートの自動生成、書式設定機能を追加)
  */
 
 // =================================================================================
@@ -10,84 +10,65 @@
 
 function bulkCreateMaterialFolders() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  Logger.log('フォルダ作成処理を開始します。');
   try {
     const mainSheet = new MainSheet();
     const sheet = mainSheet.getSheet();
     const indices = mainSheet.indices;
-    Logger.log('メインシートの情報を取得しました。');
 
-    // 必須列の存在チェック
     const requiredColumns = {
       KIBAN: indices.KIBAN, KIBAN_URL: indices.KIBAN_URL,
       MODEL: indices.MODEL, SERIES_URL: indices.SERIES_URL
     };
     for (const [key, value] of Object.entries(requiredColumns)) {
-      if (!value) throw new Error(`必須列「${key}」が見つかりません。`);
+      if (!value) throw new Error(`必要な列「${key}」が見つかりません。`);
     }
 
     const lastRow = mainSheet.getLastRow();
-    if (lastRow < mainSheet.startRow) {
-      Logger.log('データが存在しないため処理を終了します。');
-      ss.toast('データがありません。');
-      return;
-    }
+    if (lastRow < mainSheet.startRow) return;
 
     const range = sheet.getRange(mainSheet.startRow, 1, lastRow - mainSheet.startRow + 1, mainSheet.getLastColumn());
     const values = range.getValues();
     const formulas = range.getFormulas();
-    Logger.log(`${values.length}行のデータを読み込みました。`);
 
-    // 手順1: リンクが未作成のユニークな「機番」と「機種プレフィックス」を収集
-    const uniqueKibans = new Set();
+    const uniqueKibans = new Map();
     const uniqueModels = new Set();
     values.forEach((row, i) => {
-      if (!formulas[i][indices.KIBAN_URL - 1]) {
-        const kiban = String(row[indices.KIBAN - 1]).trim();
-        if (kiban) uniqueKibans.add(kiban);
+      const kiban = String(row[indices.KIBAN - 1]).trim();
+      const model = String(row[indices.MODEL - 1]).trim();
+      if (kiban && !formulas[i][indices.KIBAN_URL - 1] && !uniqueKibans.has(kiban)) {
+        uniqueKibans.set(kiban, model);
       }
-      if (!formulas[i][indices.SERIES_URL - 1]) {
-        const model = String(row[indices.MODEL - 1]).trim();
-        if (model) {
-          const match = model.match(/^[A-Za-z]+[0-9]+/);
-          const groupValue = match ? match[0] : model;
-          uniqueModels.add(groupValue);
+      if (model && !formulas[i][indices.SERIES_URL - 1]) {
+        const match = model.match(/^[A-Za-z]+[0-9]+/);
+        if(match) uniqueModels.add(match[0]);
+      }
+    });
+
+    const kibanUrlMap = new Map();
+    uniqueKibans.forEach((model, kiban) => {
+      const folderResult = getOrCreateFolder_(kiban, CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT);
+      if (folderResult && folderResult.folder) {
+        kibanUrlMap.set(kiban, folderResult.folder.getUrl());
+        if (folderResult.isNew) {
+          createManagementSheet_(folderResult.folder, kiban, model);
         }
       }
     });
-    Logger.log(`リンク作成が必要なユニーク機番: ${[...uniqueKibans].join(', ')}`);
-    Logger.log(`リンク作成が必要なユニーク機種: ${[...uniqueModels].join(', ')}`);
-
-    if (uniqueKibans.size === 0 && uniqueModels.size === 0) {
-        Logger.log('すべてのリンクは既に設定済みと判断しました。処理を終了します。');
-        ss.toast("すべてのリンクは既に設定済みです。");
-        return;
-    }
-
-    // 手順2: フォルダを一括作成し、URLをマップに保存
-    const kibanUrlMap = new Map();
-    uniqueKibans.forEach(kiban => {
-      const folderResult = getOrCreateFolder_(kiban, CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT);
-      if (folderResult && folderResult.folder) kibanUrlMap.set(kiban, folderResult.folder.getUrl());
-    });
-    Logger.log(`${kibanUrlMap.size}個の機番フォルダのURLを取得/作成しました。`);
 
     const modelUrlMap = new Map();
     uniqueModels.forEach(modelPrefix => {
       const folderResult = getOrCreateFolder_(modelPrefix, CONFIG.FOLDERS.SERIES_MODEL_PARENT);
-      if (folderResult && folderResult.folder) modelUrlMap.set(modelPrefix, folderResult.folder.getUrl());
+      if (folderResult && folderResult.folder) {
+        modelUrlMap.set(modelPrefix, folderResult.folder.getUrl());
+      }
     });
-    Logger.log(`${modelUrlMap.size}個の機種フォルダのURLを取得/作成しました。`);
 
-    // 手順3: 収集したURLを元に、シートに書き込むデータ（formulas配列）を更新
     let modified = false;
-    let linksCreated = 0;
     values.forEach((row, i) => {
       const kiban = String(row[indices.KIBAN - 1]).trim();
       if (kibanUrlMap.has(kiban) && !formulas[i][indices.KIBAN_URL - 1]) {
         formulas[i][indices.KIBAN_URL - 1] = createHyperlinkFormula(kibanUrlMap.get(kiban), kiban);
         modified = true;
-        linksCreated++;
       }
       const model = String(row[indices.MODEL - 1]).trim();
       if (model) {
@@ -96,26 +77,51 @@ function bulkCreateMaterialFolders() {
         if (modelUrlMap.has(groupValue) && !formulas[i][indices.SERIES_URL - 1]) {
           formulas[i][indices.SERIES_URL - 1] = createHyperlinkFormula(modelUrlMap.get(groupValue), groupValue);
           modified = true;
-          linksCreated++;
         }
       }
     });
-    Logger.log(`${linksCreated}個のリンクを生成しました。`);
 
-    // 手順4: 変更があった場合のみ、更新後のformulas配列をシートに書き戻す
     if (modified) {
-      Logger.log('変更があったため、シートに書き込みます...');
       range.setFormulas(formulas);
-      Logger.log('書き込みが完了しました。');
-      ss.toast("資料フォルダの作成とリンク設定が完了しました。");
-    } else {
-      Logger.log('シートに書き込む変更はありませんでした。');
-      ss.toast("リンクを更新する行はありませんでした。");
     }
-
+    ss.toast("資料フォルダの作成とリンク設定が完了しました。");
   } catch (error) {
-    Logger.log(`エラーが発生しました: ${error.stack}`);
+    Logger.log(error.stack);
     ss.toast(`エラー: ${error.message}`);
+  }
+}
+
+/**
+ * テンプレートのスプレッドシートをコピーし、情報を書き込んでフォルダに保存する
+ */
+function createManagementSheet_(targetFolder, kiban, model) {
+  const templateId = CONFIG.TEMPLATES.MANAGEMENT_SHEET_TEMPLATE_ID;
+  if (!templateId || templateId.includes("...")) {
+    Logger.log("テンプレートIDがConfig.gsに設定されていません。");
+    return;
+  }
+
+  try {
+    const templateFile = DriveApp.getFileById(templateId);
+    const newFileName = `${kiban}盤配指示図出図管理表`;
+    
+    const newFile = templateFile.makeCopy(newFileName, targetFolder);
+    const newSpreadsheet = SpreadsheetApp.openById(newFile.getId());
+    const sheet = newSpreadsheet.getSheets()[0];
+
+    // 指定のセルに情報を書き込む
+    sheet.getRange("B4").setValue("機種：" + model); // B4セルに機種
+    sheet.getRange("B5").setValue("製番：" + kiban); // B5セルに製番
+
+    // シート全体の書式を設定
+    sheet.getDataRange().setFontFamily("Arial").setFontSize(11);
+
+    SpreadsheetApp.flush();
+
+    Logger.log(`管理表「${newFileName}」をフォルダ「${targetFolder.getName()}」に作成しました。`);
+  } catch (e) {
+    Logger.log(`管理表の作成中にエラー: ${e.message}`);
+    SpreadsheetApp.getActiveSpreadsheet().toast("管理表の作成に失敗しました。ログを確認してください。");
   }
 }
 
@@ -143,12 +149,17 @@ function getOrCreateFolder_(name, parentFolderId) {
 function createWeeklyBackup() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   try {
-    if (!CONFIG.FOLDERS.BACKUP_PARENT) throw new Error("バックアップ用フォルダIDが設定されていません。");
+    if (!CONFIG.FOLDERS.BACKUP_PARENT) {
+      throw new Error("バックアップ用フォルダIDが設定されていません。");
+    }
+
     const originalName = ss.getName();
     const timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), DATE_FORMATS.BACKUP_TIMESTAMP);
     const backupFileName = `${CONFIG.BACKUP.PREFIX}${originalName}_${timestamp}`;
     const parentFolder = DriveApp.getFolderById(CONFIG.FOLDERS.BACKUP_PARENT);
+
     DriveApp.getFileById(ss.getId()).makeCopy(backupFileName, parentFolder);
+
     const files = parentFolder.getFiles();
     const backupFiles = [];
     while (files.hasNext()) {
@@ -157,6 +168,7 @@ function createWeeklyBackup() {
         backupFiles.push(file);
       }
     }
+
     if (backupFiles.length > CONFIG.BACKUP.KEEP_COUNT) {
       backupFiles.sort((a, b) => a.getDateCreated() - b.getDateCreated());
       const toDeleteCount = backupFiles.length - CONFIG.BACKUP.KEEP_COUNT;
