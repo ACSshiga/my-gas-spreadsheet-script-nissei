@@ -1,7 +1,7 @@
 /**
  * DriveIntegration.gs
  * Google Driveとの連携機能（フォルダ作成、バックアップ）を管理します。
- * (顧客用管理シートの自動生成、書式設定機能を追加)
+ * (効率化・安定化・バグ修正版)
  */
 
 // =================================================================================
@@ -15,6 +15,7 @@ function bulkCreateMaterialFolders() {
     const sheet = mainSheet.getSheet();
     const indices = mainSheet.indices;
 
+    // 必須列の存在チェック
     const requiredColumns = {
       KIBAN: indices.KIBAN, KIBAN_URL: indices.KIBAN_URL,
       MODEL: indices.MODEL, SERIES_URL: indices.SERIES_URL
@@ -24,33 +25,46 @@ function bulkCreateMaterialFolders() {
     }
 
     const lastRow = mainSheet.getLastRow();
-    if (lastRow < mainSheet.startRow) return;
+    if (lastRow < mainSheet.startRow) {
+      ss.toast("データがありません。");
+      return;
+    }
 
     const range = sheet.getRange(mainSheet.startRow, 1, lastRow - mainSheet.startRow + 1, mainSheet.getLastColumn());
     const values = range.getValues();
     const formulas = range.getFormulas();
 
+    // 手順1: リンクが未作成のユニークな「機番」と「機種」を収集
     const uniqueKibans = new Map();
     const uniqueModels = new Set();
     values.forEach((row, i) => {
-      const kiban = String(row[indices.KIBAN - 1]).trim();
-      const model = String(row[indices.MODEL - 1]).trim();
-      if (kiban && !formulas[i][indices.KIBAN_URL - 1] && !uniqueKibans.has(kiban)) {
-        uniqueKibans.set(kiban, model);
+      // リンク先のセルに数式も値も入っていないことを確認
+      if (!formulas[i][indices.KIBAN_URL - 1] && String(row[indices.KIBAN_URL - 1]).trim() === '') {
+        const kiban = String(row[indices.KIBAN - 1]).trim();
+        if (kiban && !uniqueKibans.has(kiban)) {
+          // 機番と、それに対応する機種名をペアで保存
+          uniqueKibans.set(kiban, String(row[indices.MODEL - 1]).trim());
+        }
       }
-      if (model && !formulas[i][indices.SERIES_URL - 1]) {
-        const match = model.match(/^[A-Za-z]+[0-9]+/);
-        if(match) uniqueModels.add(match[0]);
+      if (!formulas[i][indices.SERIES_URL - 1] && String(row[indices.SERIES_URL - 1]).trim() === '') {
+        const model = String(row[indices.MODEL - 1]).trim();
+        if (model) {
+          const match = model.match(/^[A-Za-z]+[0-9]+/);
+          const groupValue = match ? match[0] : model;
+          uniqueModels.add(groupValue);
+        }
       }
     });
 
+    // 手順2: フォルダを一括作成し、URLをマップに保存
     const kibanUrlMap = new Map();
     uniqueKibans.forEach((model, kiban) => {
       const folderResult = getOrCreateFolder_(kiban, CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT);
       if (folderResult && folderResult.folder) {
         kibanUrlMap.set(kiban, folderResult.folder.getUrl());
+        // フォルダが「新規作成」された場合のみ、顧客用管理シートも生成する
         if (folderResult.isNew) {
-          createManagementSheet_(folderResult.folder, kiban, model);
+           createManagementSheet_(folderResult.folder, kiban, model);
         }
       }
     });
@@ -63,10 +77,11 @@ function bulkCreateMaterialFolders() {
       }
     });
 
+    // 手順3: 収集したURLを元に、シートに書き込むための formulas 配列を更新
     let modified = false;
     values.forEach((row, i) => {
       const kiban = String(row[indices.KIBAN - 1]).trim();
-      if (kibanUrlMap.has(kiban) && !formulas[i][indices.KIBAN_URL - 1]) {
+      if (kibanUrlMap.has(kiban) && !formulas[i][indices.KIBAN_URL - 1] && String(values[i][indices.KIBAN_URL - 1]).trim() === '') {
         formulas[i][indices.KIBAN_URL - 1] = createHyperlinkFormula(kibanUrlMap.get(kiban), kiban);
         modified = true;
       }
@@ -74,17 +89,26 @@ function bulkCreateMaterialFolders() {
       if (model) {
         const match = model.match(/^[A-Za-z]+[0-9]+/);
         const groupValue = match ? match[0] : model;
-        if (modelUrlMap.has(groupValue) && !formulas[i][indices.SERIES_URL - 1]) {
+        if (modelUrlMap.has(groupValue) && !formulas[i][indices.SERIES_URL - 1] && String(values[i][indices.SERIES_URL - 1]).trim() === '') {
           formulas[i][indices.SERIES_URL - 1] = createHyperlinkFormula(modelUrlMap.get(groupValue), groupValue);
           modified = true;
         }
       }
     });
 
+    // 手順4: 変更があった場合のみ、データを再構築してシートに一度に書き戻す
     if (modified) {
-      range.setFormulas(formulas);
+      const outputData = values.map((row, i) => {
+        return row.map((cell, j) => {
+          // 数式があるセルは数式を、ないセルは元の値を採用する
+          return formulas[i][j] || cell;
+        });
+      });
+      range.setValues(outputData);
+      ss.toast("資料フォルダの作成とリンク設定が完了しました。");
+    } else {
+      ss.toast("すべてのリンクは既に設定済みです。");
     }
-    ss.toast("資料フォルダの作成とリンク設定が完了しました。");
   } catch (error) {
     Logger.log(error.stack);
     ss.toast(`エラー: ${error.message}`);
@@ -109,15 +133,11 @@ function createManagementSheet_(targetFolder, kiban, model) {
     const newSpreadsheet = SpreadsheetApp.openById(newFile.getId());
     const sheet = newSpreadsheet.getSheets()[0];
 
-    // 指定のセルに情報を書き込む
-    sheet.getRange("B4").setValue("機種：" + model); // B4セルに機種
-    sheet.getRange("B5").setValue("製番：" + kiban); // B5セルに製番
-
-    // シート全体の書式を設定
+    sheet.getRange("B4").setValue("機種：" + model);
+    sheet.getRange("B5").setValue("製番：" + kiban);
     sheet.getDataRange().setFontFamily("Arial").setFontSize(11);
 
     SpreadsheetApp.flush();
-
     Logger.log(`管理表「${newFileName}」をフォルダ「${targetFolder.getName()}」に作成しました。`);
   } catch (e) {
     Logger.log(`管理表の作成中にエラー: ${e.message}`);
