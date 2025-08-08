@@ -1,6 +1,7 @@
 /**
  * DriveIntegration.gs
  * Google Driveとの連携機能（フォルダ作成、バックアップ）を管理します。
+ * (効率化・安定化 改訂版)
  */
 
 // =================================================================================
@@ -9,7 +10,7 @@
 
 /**
  * メインシートのデータに基づき、資料フォルダを一括作成し、シートにリンクを挿入します。
- * 機種(MODEL)については、指定された命名規則（先頭の英語+数字）に基づいてグルーピングされます。
+ * より効率的で安定したロジックに修正済み。
  */
 function bulkCreateMaterialFolders() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -17,6 +18,7 @@ function bulkCreateMaterialFolders() {
     const mainSheet = new MainSheet();
     const sheet = mainSheet.getSheet();
     const indices = mainSheet.indices;
+
     const requiredColumns = {
       KIBAN: indices.KIBAN, KIBAN_URL: indices.KIBAN_URL,
       MODEL: indices.MODEL, SERIES_URL: indices.SERIES_URL
@@ -27,61 +29,74 @@ function bulkCreateMaterialFolders() {
 
     const lastRow = mainSheet.getLastRow();
     if (lastRow < mainSheet.startRow) return;
+
     const range = sheet.getRange(mainSheet.startRow, 1, lastRow - mainSheet.startRow + 1, mainSheet.getLastColumn());
     const values = range.getValues();
     const formulas = range.getFormulas();
-    const processedItems = new Set();
 
-    const folderCreationTasks = [
-      {
-        type: 'KIBAN', // 機番は完全一致
-        valueCol: indices.KIBAN,
-        linkCol: indices.KIBAN_URL,
-        parentFolderId: CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT
-      },
-      {
-        type: 'MODEL', // 機種は前方一致
-        valueCol: indices.MODEL,
-        linkCol: indices.SERIES_URL,
-        parentFolderId: CONFIG.FOLDERS.SERIES_MODEL_PARENT
+    // 手順1: リンクが未作成のユニークな「機番」と「機種プレフィックス」を収集
+    const uniqueKibans = new Set();
+    const uniqueModels = new Set();
+    values.forEach((row, i) => {
+      if (!formulas[i][indices.KIBAN_URL - 1]) {
+        const kiban = String(row[indices.KIBAN - 1]).trim();
+        if (kiban) uniqueKibans.add(kiban);
       }
-    ];
-
-    folderCreationTasks.forEach(task => {
-      processedItems.clear();
-      values.forEach((row, i) => {
-        const originalValue = String(row[task.valueCol - 1]).trim();
-        if (!originalValue) return;
-
-        let groupValue;
-        let folderName;
-
-        if (task.type === 'MODEL') {
-          const match = originalValue.match(/^[A-Za-z]+[0-9]+/);
-          groupValue = match ? match[0] : originalValue;
-          folderName = groupValue;
-        } else {
-          groupValue = originalValue;
-          folderName = originalValue;
+      if (!formulas[i][indices.SERIES_URL - 1]) {
+        const model = String(row[indices.MODEL - 1]).trim();
+        if (model) {
+          const match = model.match(/^[A-Za-z]+[0-9]+/);
+          const groupValue = match ? match[0] : model;
+          uniqueModels.add(groupValue);
         }
-        
-        if (groupValue && !processedItems.has(groupValue)) {
-          const folderResult = getOrCreateFolder_(folderName, task.parentFolderId);
-          if (folderResult && folderResult.folder) {
-            const url = folderResult.folder.getUrl();
-            if (task.type === 'MODEL') {
-              updateLinksForModelPrefix_(values, formulas, groupValue, task.valueCol, task.linkCol, url);
-            } else {
-              updateLinksForSameValue_(values, formulas, groupValue, task.valueCol, task.linkCol, url);
-            }
-          }
-          processedItems.add(groupValue);
-        }
-      });
+      }
     });
 
-    const outputData = values.map((row, i) => row.map((cell, j) => formulas[i][j] || cell));
-    range.setValues(outputData);
+    // 手順2: フォルダを一括作成し、URLをマップに保存
+    const kibanUrlMap = new Map();
+    uniqueKibans.forEach(kiban => {
+      const folderResult = getOrCreateFolder_(kiban, CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT);
+      if (folderResult && folderResult.folder) {
+        kibanUrlMap.set(kiban, folderResult.folder.getUrl());
+      }
+    });
+
+    const modelUrlMap = new Map();
+    uniqueModels.forEach(modelPrefix => {
+      const folderResult = getOrCreateFolder_(modelPrefix, CONFIG.FOLDERS.SERIES_MODEL_PARENT);
+      if (folderResult && folderResult.folder) {
+        modelUrlMap.set(modelPrefix, folderResult.folder.getUrl());
+      }
+    });
+
+    // 手順3: 収集したURLを元に、シートに書き込むデータ（formulas配列）を更新
+    let modified = false;
+    values.forEach((row, i) => {
+      // 機番リンクの更新
+      const kiban = String(row[indices.KIBAN - 1]).trim();
+      if (kibanUrlMap.has(kiban) && !formulas[i][indices.KIBAN_URL - 1]) {
+        const url = kibanUrlMap.get(kiban);
+        formulas[i][indices.KIBAN_URL - 1] = createHyperlinkFormula(url, kiban);
+        modified = true;
+      }
+
+      // 機種リンクの更新
+      const model = String(row[indices.MODEL - 1]).trim();
+      if (model) {
+        const match = model.match(/^[A-Za-z]+[0-9]+/);
+        const groupValue = match ? match[0] : model;
+        if (modelUrlMap.has(groupValue) && !formulas[i][indices.SERIES_URL - 1]) {
+          const url = modelUrlMap.get(groupValue);
+          formulas[i][indices.SERIES_URL - 1] = createHyperlinkFormula(url, groupValue);
+          modified = true;
+        }
+      }
+    });
+
+    // 手順4: 変更があった場合のみ、更新後のformulas配列をシートに書き戻す
+    if (modified) {
+      range.setFormulas(formulas);
+    }
 
     ss.toast("資料フォルダの作成とリンク設定が完了しました。");
   } catch (error) {
@@ -89,37 +104,6 @@ function bulkCreateMaterialFolders() {
     ss.toast(`エラー: ${error.message}`);
   }
 }
-
-/**
- * 指定された列の値が一致するすべての行に、ハイパーリンクを設定します。
- */
-function updateLinksForSameValue_(allValues, allFormulas, valueToMatch, valueColumn, linkColumn, url) {
-  allValues.forEach((row, i) => {
-    if (String(row[valueColumn - 1]).trim() === valueToMatch) {
-      if (!allFormulas[i][linkColumn - 1]) {
-        allFormulas[i][linkColumn - 1] = createHyperlinkFormula(url, valueToMatch);
-      }
-    }
-  });
-}
-
-/**
- * 指定されたプレフィックスに前方一致するすべての行に、ハイパーリンクを設定します。
- * リンクの表示名は、フォルダ名と同じプレフィックスになります。
- */
-function updateLinksForModelPrefix_(allValues, allFormulas, prefixToMatch, valueColumn, linkColumn, url) {
-  allValues.forEach((row, i) => {
-    const fullValue = String(row[valueColumn - 1]).trim();
-    if (fullValue.startsWith(prefixToMatch)) {
-      if (!allFormulas[i][linkColumn - 1]) {
-        // ▼▼▼ 修正箇所: 表示名をフォルダ名（prefixToMatch）に変更 ▼▼▼
-        allFormulas[i][linkColumn - 1] = createHyperlinkFormula(url, prefixToMatch);
-        // ▲▲▲ 修正完了 ▲▲▲
-      }
-    }
-  });
-}
-
 
 /**
  * 指定された名前のフォルダを、指定された親フォルダ内に作成または取得する内部関数。
