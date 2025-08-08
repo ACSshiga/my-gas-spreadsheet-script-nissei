@@ -1,7 +1,7 @@
 /**
  * DriveIntegration.gs
  * Google Driveとの連携機能（フォルダ作成、バックアップ）を管理します。
- * (効率化・安定化・バグ修正版)
+ * (データ保護とエラーへのリトライ機能を強化した最終改訂版)
  */
 
 // =================================================================================
@@ -15,7 +15,6 @@ function bulkCreateMaterialFolders() {
     const sheet = mainSheet.getSheet();
     const indices = mainSheet.indices;
 
-    // 必須列の存在チェック
     const requiredColumns = {
       KIBAN: indices.KIBAN, KIBAN_URL: indices.KIBAN_URL,
       MODEL: indices.MODEL, SERIES_URL: indices.SERIES_URL
@@ -38,11 +37,9 @@ function bulkCreateMaterialFolders() {
     const uniqueKibans = new Map();
     const uniqueModels = new Set();
     values.forEach((row, i) => {
-      // リンク先のセルに数式も値も入っていないことを確認
       if (!formulas[i][indices.KIBAN_URL - 1] && String(row[indices.KIBAN_URL - 1]).trim() === '') {
         const kiban = String(row[indices.KIBAN - 1]).trim();
         if (kiban && !uniqueKibans.has(kiban)) {
-          // 機番と、それに対応する機種名をペアで保存
           uniqueKibans.set(kiban, String(row[indices.MODEL - 1]).trim());
         }
       }
@@ -50,8 +47,7 @@ function bulkCreateMaterialFolders() {
         const model = String(row[indices.MODEL - 1]).trim();
         if (model) {
           const match = model.match(/^[A-Za-z]+[0-9]+/);
-          const groupValue = match ? match[0] : model;
-          uniqueModels.add(groupValue);
+          uniqueModels.add(match ? match[0] : model);
         }
       }
     });
@@ -62,7 +58,6 @@ function bulkCreateMaterialFolders() {
       const folderResult = getOrCreateFolder_(kiban, CONFIG.FOLDERS.REFERENCE_MATERIAL_PARENT);
       if (folderResult && folderResult.folder) {
         kibanUrlMap.set(kiban, folderResult.folder.getUrl());
-        // フォルダが「新規作成」された場合のみ、顧客用管理シートも生成する
         if (folderResult.isNew) {
            createManagementSheet_(folderResult.folder, kiban, model);
         }
@@ -77,46 +72,46 @@ function bulkCreateMaterialFolders() {
       }
     });
 
-    // 手順3: 収集したURLを元に、シートに書き込むための formulas 配列を更新
+    // ★★★★★ 修正点：元のデータを保持し、変更箇所だけを更新する安全な方法に変更 ★★★★★
+    const outputData = values.map((row, i) =>
+      row.map((cell, j) => formulas[i][j] || cell)
+    );
+
     let modified = false;
     values.forEach((row, i) => {
       const kiban = String(row[indices.KIBAN - 1]).trim();
-      if (kibanUrlMap.has(kiban) && !formulas[i][indices.KIBAN_URL - 1] && String(values[i][indices.KIBAN_URL - 1]).trim() === '') {
-        formulas[i][indices.KIBAN_URL - 1] = createHyperlinkFormula(kibanUrlMap.get(kiban), kiban);
+      if (kibanUrlMap.has(kiban) && !formulas[i][indices.KIBAN_URL - 1]) {
+        outputData[i][indices.KIBAN_URL - 1] = createHyperlinkFormula(kibanUrlMap.get(kiban), kiban);
         modified = true;
       }
       const model = String(row[indices.MODEL - 1]).trim();
       if (model) {
         const match = model.match(/^[A-Za-z]+[0-9]+/);
         const groupValue = match ? match[0] : model;
-        if (modelUrlMap.has(groupValue) && !formulas[i][indices.SERIES_URL - 1] && String(values[i][indices.SERIES_URL - 1]).trim() === '') {
-          formulas[i][indices.SERIES_URL - 1] = createHyperlinkFormula(modelUrlMap.get(groupValue), groupValue);
+        if (modelUrlMap.has(groupValue) && !formulas[i][indices.SERIES_URL - 1]) {
+          outputData[i][indices.SERIES_URL - 1] = createHyperlinkFormula(modelUrlMap.get(groupValue), groupValue);
           modified = true;
         }
       }
     });
 
-    // 手順4: 変更があった場合のみ、データを再構築してシートに一度に書き戻す
     if (modified) {
-      const outputData = values.map((row, i) => {
-        return row.map((cell, j) => {
-          // 数式があるセルは数式を、ないセルは元の値を採用する
-          return formulas[i][j] || cell;
-        });
-      });
       range.setValues(outputData);
       ss.toast("資料フォルダの作成とリンク設定が完了しました。");
     } else {
       ss.toast("すべてのリンクは既に設定済みです。");
     }
+
   } catch (error) {
     Logger.log(error.stack);
     ss.toast(`エラー: ${error.message}`);
   }
 }
 
+
 /**
  * テンプレートのスプレッドシートをコピーし、情報を書き込んでフォルダに保存する
+ * (エラー発生時に3回まで自動で再試行する機能を追加)
  */
 function createManagementSheet_(targetFolder, kiban, model) {
   const templateId = CONFIG.TEMPLATES.MANAGEMENT_SHEET_TEMPLATE_ID;
@@ -128,22 +123,48 @@ function createManagementSheet_(targetFolder, kiban, model) {
   try {
     const templateFile = DriveApp.getFileById(templateId);
     const newFileName = `${kiban}盤配指示図出図管理表`;
-    
     const newFile = templateFile.makeCopy(newFileName, targetFolder);
-    const newSpreadsheet = SpreadsheetApp.openById(newFile.getId());
-    const sheet = newSpreadsheet.getSheets()[0];
+    const newFileId = newFile.getId();
 
-    sheet.getRange("B4").setValue("機種：" + model);
-    sheet.getRange("B5").setValue("製番：" + kiban);
-    sheet.getDataRange().setFontFamily("Arial").setFontSize(11);
+    let success = false;
+    let attempts = 3;
+    let waitTime = 1000; // 1秒
 
-    SpreadsheetApp.flush();
-    Logger.log(`管理表「${newFileName}」をフォルダ「${targetFolder.getName()}」に作成しました。`);
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const newSpreadsheet = SpreadsheetApp.openById(newFileId);
+        const sheet = newSpreadsheet.getSheets()[0];
+        
+        sheet.getRange("B4").setValue("機種：" + model);
+        sheet.getRange("B5").setValue("製番：" + kiban);
+        sheet.getDataRange().setFontFamily("Arial").setFontSize(11);
+        SpreadsheetApp.flush();
+        
+        success = true;
+        Logger.log(`管理表「${newFileName}」をフォルダ「${targetFolder.getName()}」に作成し、編集しました。`);
+        break;
+      } catch (e) {
+        if (e.message.includes("サービスに接続できなくなりました")) {
+          Logger.log(`試行 ${i + 1}/${attempts}: スプレッドシートサービスへの接続に失敗。${waitTime / 1000}秒後に再試行します。`);
+          Utilities.sleep(waitTime);
+          waitTime *= 2;
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    if (!success) {
+      Logger.log(`${attempts}回の再試行後も管理表の編集に失敗しました。`);
+      SpreadsheetApp.getActiveSpreadsheet().toast("管理表の編集に失敗しました。時間をおいて再度お試しください。");
+    }
+
   } catch (e) {
-    Logger.log(`管理表の作成中にエラー: ${e.message}`);
-    SpreadsheetApp.getActiveSpreadsheet().toast("管理表の作成に失敗しました。ログを確認してください。");
+    Logger.log(`管理表の作成または編集中にエラーが発生しました: ${e.message}`);
+    SpreadsheetApp.getActiveSpreadsheet().toast("管理表の作成中にエラーが発生しました。ログを確認してください。");
   }
 }
+
 
 /**
  * 指定された名前のフォルダを、指定された親フォルダ内に作成または取得する内部関数。
