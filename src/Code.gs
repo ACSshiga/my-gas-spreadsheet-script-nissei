@@ -1,7 +1,7 @@
 /**
  * Code.gs
  * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
- * (完了日の同期機能を追加)
+ * (データ保護とエラーへのリトライ機能を強化した最終改訂版)
  */
 
 // =================================================================================
@@ -12,7 +12,7 @@ function onOpen(e) {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('カスタムメニュー')
     .addItem('ソートビューを作成', 'createSortedView')
-    .addItem('表示を更新', 'refreshSortedView') 
+    .addItem('表示を更新', 'refreshSortedView')
     .addItem('ソートビューを全て削除', 'removeAllSortedViews')
     .addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
@@ -83,6 +83,7 @@ function onEdit(e) {
 
 /**
  * メインシートの完了日を、対応する機番フォルダ内の管理シートに同期する
+ * (エラー発生時に最大4回まで自動で再試行する機能を追加)
  */
 function syncCompletionDateToManagementSheet(kiban, date) {
   try {
@@ -96,14 +97,35 @@ function syncCompletionDateToManagementSheet(kiban, date) {
 
       if (files.hasNext()) {
         const file = files.next();
-        const spreadsheet = SpreadsheetApp.openById(file.getId());
-        const sheet = spreadsheet.getSheets()[0];
-        
+        const fileId = file.getId();
         const formattedDate = Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy/MM/dd");
-        sheet.getRange("B7").setValue("完了日：" + formattedDate); // B7セルに完了日を設定
 
-        SpreadsheetApp.flush();
-        Logger.log(`管理表「${fileName}」の完了日を更新しました。`);
+        let success = false;
+        let attempts = 4; // 再試行回数を4回に増加
+        let waitTime = 2000; // 初回の待機時間を2秒に設定
+
+        for (let i = 0; i < attempts; i++) {
+          try {
+            const spreadsheet = SpreadsheetApp.openById(fileId);
+            const sheet = spreadsheet.getSheets()[0];
+            sheet.getRange("B7").setValue("完了日：" + formattedDate);
+            SpreadsheetApp.flush();
+            success = true;
+            Logger.log(`管理表「${fileName}」の完了日を更新しました。`);
+            break; // 成功したのでループを抜ける
+          } catch (e) {
+            if (e.message.includes("サービスに接続できなくなりました")) {
+              Logger.log(`試行 ${i + 1}/${attempts}: 完了日同期中に接続エラー。${waitTime / 1000}秒後に再試行します。`);
+              Utilities.sleep(waitTime);
+              waitTime *= 2;
+            } else {
+              throw e;
+            }
+          }
+        }
+        if (!success) {
+          Logger.log(`${attempts}回の再試行後も完了日の同期に失敗しました。`);
+        }
       } else {
         Logger.log(`フォルダ「${kiban}」内に管理表「${fileName}」が見つかりませんでした。`);
       }

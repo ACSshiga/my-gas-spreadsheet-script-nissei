@@ -72,7 +72,7 @@ function bulkCreateMaterialFolders() {
       }
     });
 
-    // ★★★★★ 修正点：元のデータを保持し、変更箇所だけを更新する安全な方法に変更 ★★★★★
+    // 手順3: 元のデータを保持し、変更箇所だけを更新する安全な方法
     const outputData = values.map((row, i) =>
       row.map((cell, j) => formulas[i][j] || cell)
     );
@@ -95,6 +95,7 @@ function bulkCreateMaterialFolders() {
       }
     });
 
+    // 手順4: 変更があった場合のみ、シートに書き戻す
     if (modified) {
       range.setValues(outputData);
       ss.toast("資料フォルダの作成とリンク設定が完了しました。");
@@ -111,7 +112,7 @@ function bulkCreateMaterialFolders() {
 
 /**
  * テンプレートのスプレッドシートをコピーし、情報を書き込んでフォルダに保存する
- * (エラー発生時に3回まで自動で再試行する機能を追加)
+ * (エラー発生時に最大4回まで自動で再試行する機能を追加)
  */
 function createManagementSheet_(targetFolder, kiban, model) {
   const templateId = CONFIG.TEMPLATES.MANAGEMENT_SHEET_TEMPLATE_ID;
@@ -127,8 +128,11 @@ function createManagementSheet_(targetFolder, kiban, model) {
     const newFileId = newFile.getId();
 
     let success = false;
-    let attempts = 3;
-    let waitTime = 1000; // 1秒
+    let attempts = 4; // 再試行回数を4回に増加
+    let waitTime = 2000; // 初回の待機時間を2秒に設定
+
+    // ファイル作成後、最初の操作の前に少し待つ
+    Utilities.sleep(2000);
 
     for (let i = 0; i < attempts; i++) {
       try {
@@ -142,14 +146,14 @@ function createManagementSheet_(targetFolder, kiban, model) {
         
         success = true;
         Logger.log(`管理表「${newFileName}」をフォルダ「${targetFolder.getName()}」に作成し、編集しました。`);
-        break;
+        break; // 成功したのでループを抜ける
       } catch (e) {
         if (e.message.includes("サービスに接続できなくなりました")) {
           Logger.log(`試行 ${i + 1}/${attempts}: スプレッドシートサービスへの接続に失敗。${waitTime / 1000}秒後に再試行します。`);
           Utilities.sleep(waitTime);
-          waitTime *= 2;
+          waitTime *= 2; // 次の待機時間を2倍にする
         } else {
-          throw e;
+          throw e; // その他の予期せぬエラーは再スロー
         }
       }
     }
