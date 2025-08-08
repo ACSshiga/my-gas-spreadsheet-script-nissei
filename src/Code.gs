@@ -1,7 +1,7 @@
 /**
  * Code.gs
  * イベントハンドラ、カスタムメニュー、トリガー設定を管理する司令塔。
- * データコピー方式による、リンク・書式対応の多機能ソートビューを実装。
+ * データコピー方式による、リンク・書式対応の多機能ソートビューを実装。(改訂版)
  */
 
 // =================================================================================
@@ -12,6 +12,7 @@ function onOpen(e) {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('カスタムメニュー')
     .addItem('ソートビューを作成', 'createSortedView')
+    .addItem('表示を更新', 'refreshSortedView') // 更新機能を追加
     .addItem('ソートビューを全て削除', 'removeAllSortedViews')
     .addSeparator()
     .addItem('請求シートを更新', 'showBillingSidebar')
@@ -20,8 +21,6 @@ function onOpen(e) {
     .addItem('週次バックアップを作成', 'createWeeklyBackup')
     .addSeparator()
     .addItem('各種設定と書式を再適用', 'runAllManualMaintenance')
-    .addItem('シート全体の書式を整える', 'applyStandardFormattingToAllSheets')
-    .addItem('次の月のカレンダーを追加', 'addNextMonthColumnsToAllInputSheets')
     .addSeparator()
     .addItem('スクリプトのキャッシュをクリア', 'clearScriptCache')
     .addItem('フォルダからインポートを実行', 'importFromDriveFolder')
@@ -44,7 +43,7 @@ function onEdit(e) {
     const sheetName = sheet.getName();
 
     if (sheetName === CONFIG.SHEETS.MAIN) {
-      colorizeSheet_(new MainSheet());
+      colorizeSheet_(new MainSheet()); // メインシートの色付けのみ実行
       const mainSheet = new MainSheet();
       if (e.range.getColumn() === mainSheet.indices.TANTOUSHA) {
         syncMainToAllInputSheets();
@@ -66,8 +65,16 @@ function onEdit(e) {
 // =================================================================================
 
 /**
+ * ソートビューを更新します。
+ */
+function refreshSortedView() {
+    SpreadsheetApp.getActiveSpreadsheet().toast('ビューを更新しています...', '処理中', 5);
+    removeAllSortedViews(false); // メッセージなしで全ビューを削除
+    createSortedView();
+}
+
+/**
  * メインシートのデータをコピー・ソートし、新しい「ソートビュー」シートを作成します。
- * リンク、書式、色、フィルタが完全に適用されます。
  */
 function createSortedView() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -84,36 +91,12 @@ function createSortedView() {
       return;
   }
 
-  // --- 空白行を除いた実データ範囲を取得 ---
   const lastRow = mainSheet.getLastRow();
-  if (lastRow < CONFIG.DATA_START_ROW.MAIN) {
+  const dataStartRow = CONFIG.DATA_START_ROW.MAIN;
+  if (lastRow < dataStartRow) {
     SpreadsheetApp.getUi().alert('メインシートにデータがありません。');
     return;
   }
-  const mainDataRange = mainSheet.getRange(1, 1, lastRow, mainSheet.getLastColumn());
-  
-  // ★★★★★ 修正点：値と数式の両方を取得 ★★★★★
-  const mainValues = mainDataRange.getValues();
-  const mainFormulas = mainDataRange.getFormulas();
-
-  // 数式が設定されているセルは数式を、そうでなければ値を採用する
-  const combinedData = mainValues.map((row, i) => {
-    return row.map((cell, j) => {
-      return mainFormulas[i][j] || cell;
-    });
-  });
-  // ★★★★★ 修正完了 ★★★★★
-
-  const headers = combinedData.shift(); // ヘッダーを分離
-  
-  // '管理No'列を基準にデータ行をソート
-  combinedData.sort((a, b) => {
-    const valA = a[sortColumnIndex - 1];
-    const valB = b[sortColumnIndex - 1];
-    return String(valA).localeCompare(String(valB), undefined, {numeric: true});
-  });
-
-  const sortedData = [headers, ...combinedData];
 
   // 新しいビューシートの名前を決定（連番処理）
   let viewSheetName = 'ソートビュー';
@@ -124,88 +107,25 @@ function createSortedView() {
   }
   
   const viewSheet = ss.insertSheet(viewSheetName, 0);
-  
-  // ソート済みデータを新しいシートに書き込み
-  viewSheet.getRange(1, 1, sortedData.length, headers.length).setValues(sortedData);
 
-  // フィルターを作成
-  viewSheet.getRange(1, 1, sortedData.length, headers.length).createFilter();
+  // ★★★★★ 修正点：copyToで数式ごと完全コピー ★★★★★
+  const sourceRange = mainSheet.getRange(1, 1, lastRow, mainSheet.getLastColumn());
+  sourceRange.copyTo(viewSheet.getRange(1, 1));
+  // ★★★★★ 修正完了 ★★★★★
 
-  // 書式と条件付き書式を適用
-  applyStandardFormattingToMainSheet();
-  applyConditionalFormattingToView(viewSheet);
+  // コピーしたデータ範囲に対して並べ替えを実行
+  const viewRangeToSort = viewSheet.getRange(dataStartRow, 1, viewSheet.getLastRow() - (dataStartRow - 1), viewSheet.getLastColumn());
+  viewRangeToSort.sort({column: sortColumnIndex, ascending: true});
+
+  // フィルターと書式を適用
+  viewSheet.getRange(1, 1, viewSheet.getLastRow(), viewSheet.getLastColumn()).createFilter();
+  applyStandardFormattingToMainSheet(); // ヘッダー書式とウィンドウ枠固定
   
+  // 色付け処理
+  colorizeSheet_(new ViewSheet(viewSheet));
+
   viewSheet.activate();
   ss.toast(`${viewSheetName} を作成しました。`, '完了', 5);
-}
-
-/**
- * ビューシートに条件付き書式（色付け）を適用します。
- * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - 対象のビューシート
- */
-function applyConditionalFormattingToView(sheet) {
-  const indices = getColumnIndices(sheet, MAIN_SHEET_HEADERS);
-  const lastRow = sheet.getLastRow();
-  const lastCol = sheet.getLastColumn();
-  const rules = [];
-
-  // 既存のルールをクリア
-  sheet.clearConditionalFormatRules();
-
-  // 1. 交互の行の背景色
-  const alternateRowRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=MOD(ROW(), 2) = 1') // 奇数行(データとしては偶数番目)
-    .setBackground(CONFIG.COLORS.ALTERNATE_ROW)
-    .setRanges([sheet.getRange(2, 1, lastRow - 1, lastCol)])
-    .build();
-  rules.push(alternateRowRule);
-
-  // 2. 各列の色付けルール
-  const colorMasters = [
-    { master: CONFIG.SHEETS.TANTOUSHA_MASTER, colIndex: indices.TANTOUSHA, colorCol: 2 },
-    { master: CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, colIndex: indices.SAGYOU_KUBUN, colorCol: 1 },
-    { master: CONFIG.SHEETS.TOIAWASE_MASTER, colIndex: indices.TOIAWASE, colorCol: 1 }
-  ];
-
-  colorMasters.forEach(item => {
-    if (!item.colIndex) return;
-    const colorMap = getColorMapFromMaster(item.master, 0, item.colorCol);
-    const range = sheet.getRange(2, item.colIndex, lastRow - 1, 1);
-    
-    for (const [key, color] of colorMap.entries()) {
-      if (key && color) {
-        rules.push(SpreadsheetApp.newConditionalFormatRule()
-          .whenTextEqualTo(key)
-          .setBackground(color)
-          .setRanges([range])
-          .build());
-      }
-    }
-  });
-  
-  // 3. 進捗列と、それに連動する管理No列の色付けルール
-  const progressColIndex = indices.PROGRESS;
-  const mgmtNoColIndex = indices.MGMT_NO;
-  if (progressColIndex && mgmtNoColIndex) {
-      const progressColorMap = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
-      const progressColLetter = String.fromCharCode(64 + progressColIndex);
-      const dataRangeForRules = sheet.getRange(2, 1, lastRow - 1, lastCol);
-
-      for(const [key, color] of progressColorMap.entries()){
-          if(key && color){
-              rules.push(SpreadsheetApp.newConditionalFormatRule()
-                  .whenFormulaSatisfied(`=$${progressColLetter}2="${key}"`)
-                  .setBackground(color)
-                  .setRanges([
-                      sheet.getRange(2, progressColIndex, lastRow -1, 1),
-                      sheet.getRange(2, mgmtNoColIndex, lastRow -1, 1)
-                  ])
-                  .build());
-          }
-      }
-  }
-
-  sheet.setConditionalFormatRules(rules);
 }
 
 /**
@@ -213,23 +133,134 @@ function applyConditionalFormattingToView(sheet) {
  */
 function removeAllSortedViews(showMessage = true) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let deleted = false;
   ss.getSheets().forEach(sheet => {
     if (sheet.getName().startsWith('ソートビュー')) {
       ss.deleteSheet(sheet);
+      deleted = true;
     }
   });
 
-  const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN)
-  if(mainSheet) mainSheet.activate();
-  if (showMessage) {
+  const mainSheet = ss.getSheetByName(CONFIG.SHEETS.MAIN);
+  if (mainSheet) mainSheet.activate();
+  
+  if (showMessage && deleted) {
     ss.toast('すべてのソートビューを削除しました。', '完了', 3);
   }
 }
 
 // =================================================================================
-// === 書式設定、色付け、その他（既存の関数群） ===
+// === 色付け処理とヘルパークラス ===
 // =================================================================================
 
+/**
+ * ソートビューシートを扱うための簡易クラス
+ */
+class ViewSheet {
+  constructor(sheet) {
+    this.sheet = sheet;
+    this.startRow = CONFIG.DATA_START_ROW.MAIN;
+    this.indices = getColumnIndices(this.sheet, MAIN_SHEET_HEADERS);
+  }
+  getSheet() { return this.sheet; }
+  getLastRow() { return this.sheet.getLastRow(); }
+}
+
+
+function colorizeAllSheets() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    ss.getSheets().forEach(sheet => {
+      const sheetName = sheet.getName();
+      try {
+        if (sheetName === CONFIG.SHEETS.MAIN) {
+          colorizeSheet_(new MainSheet());
+        } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
+          const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
+          colorizeSheet_(new InputSheet(tantoushaName));
+        } else if (sheetName.startsWith('ソートビュー')) {
+          colorizeSheet_(new ViewSheet(sheet));
+        }
+      } catch (e) {
+        Logger.log(`シート「${sheetName}」の色付け処理中にエラー: ${e.message}`);
+      }
+    });
+  } catch (error) {
+    Logger.log(`色付け処理でエラーが発生しました: ${error.stack}`);
+  }
+}
+
+
+/**
+ * ★★★★★ 修正点：この関数は背景色のみを設定し、数式を上書きしない ★★★★★
+ */
+function colorizeSheet_(sheetObject) {
+  const sheet = sheetObject.getSheet();
+  const startRow = sheetObject.startRow;
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow < startRow) return;
+
+  const indices = sheetObject.indices;
+  const lastCol = sheet.getLastColumn();
+  const range = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol);
+  
+  const values = range.getValues();
+  const backgroundColors = range.getBackgrounds();
+
+  const mgmtNoCol = indices.MGMT_NO;
+  const progressCol = indices.PROGRESS;
+  const tantoushaCol = indices.TANTOUSHA;
+  const toiawaseCol = indices.TOIAWASE;
+  const sagyouKubunCol = indices.SAGYOU_KUBUN;
+
+  const PROGRESS_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
+  const TANTOUSHA_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TANTOUSHA_MASTER, 0, 2);
+  const SAGYOU_KUBUN_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, 0, 1);
+  const TOIAWASE_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TOIAWASE_MASTER, 0, 1);
+
+  values.forEach((row, i) => {
+    const baseColor = (i % 2 === 0) ? CONFIG.COLORS.DEFAULT_BACKGROUND : CONFIG.COLORS.ALTERNATE_ROW;
+    
+    // 全列の基本色を設定
+    for (let j = 0; j < lastCol; j++) {
+      backgroundColors[i][j] = baseColor;
+    }
+
+    // 進捗に応じた色付け (管理Noにも適用)
+    if (progressCol) {
+      const progressValue = safeTrim(row[progressCol - 1]);
+      const progressColor = getColor(PROGRESS_COLORS, progressValue, baseColor);
+      backgroundColors[i][progressCol - 1] = progressColor;
+      if (mgmtNoCol) {
+        backgroundColors[i][mgmtNoCol - 1] = progressColor;
+      }
+    }
+
+    // 各マスターに応じた色付け
+    if (sagyouKubunCol) {
+      const value = safeTrim(row[sagyouKubunCol - 1]);
+      backgroundColors[i][sagyouKubunCol - 1] = getColor(SAGYOU_KUBUN_COLORS, value, baseColor);
+    }
+    if (tantoushaCol) {
+       const value = safeTrim(row[tantoushaCol - 1]);
+       backgroundColors[i][tantoushaCol - 1] = getColor(TANTOUSHA_COLORS, value, baseColor);
+    }
+    if (toiawaseCol) {
+       const value = safeTrim(row[toiawaseCol - 1]);
+       backgroundColors[i][toiawaseCol - 1] = getColor(TOIAWASE_COLORS, value, baseColor);
+    }
+  });
+
+  // 背景色のみを更新する
+  range.setBackgrounds(backgroundColors);
+}
+
+// =================================================================================
+// === 既存のヘルパー関数群（変更なし） ===
+// =================================================================================
+// (periodicMaintenance, runAllManualMaintenance, applyStandardFormattingToAllSheets, etc.)
+// ... 以下のコードは変更がないため、そのまま貼り付けてください ...
 function periodicMaintenance() {
   setupAllDataValidations();
 }
@@ -367,107 +398,4 @@ function setupAllDataValidations() {
   } catch(e) {
     Logger.log(`データ入力規則の設定中にエラー: ${e.message}`);
   }
-}
-
-function colorizeAllSheets() {
-  try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const allSheets = ss.getSheets();
-
-    allSheets.forEach(sheet => {
-      const sheetName = sheet.getName();
-      try {
-        if (sheetName === CONFIG.SHEETS.MAIN) {
-          colorizeSheet_(new MainSheet());
-        } else if (sheetName.startsWith(CONFIG.SHEETS.INPUT_PREFIX)) {
-          const tantoushaName = sheetName.replace(CONFIG.SHEETS.INPUT_PREFIX, '');
-          colorizeSheet_(new InputSheet(tantoushaName));
-        }
-      } catch (e) {
-        Logger.log(`シート「${sheetName}」の色付け処理中にエラー: ${e.message}`);
-      }
-    });
-  } catch (error) {
-    Logger.log(`色付け処理でエラーが発生しました: ${error.stack}`);
-  }
-}
-
-function colorizeSheet_(sheetObject) {
-  const PROGRESS_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SHINCHOKU_MASTER, 0, 1);
-  const TANTOUSHA_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TANTOUSHA_MASTER, 0, 2);
-  const SAGYOU_KUBUN_COLORS = getColorMapFromMaster(CONFIG.SHEETS.SAGYOU_KUBUN_MASTER, 0, 1);
-  const TOIAWASE_COLORS = getColorMapFromMaster(CONFIG.SHEETS.TOIAWASE_MASTER, 0, 1);
-  const sheet = sheetObject.getSheet();
-  const indices = sheetObject.indices;
-  const lastRow = sheetObject.getLastRow();
-  const startRow = sheetObject.startRow;
-  if (lastRow < startRow) return;
-  const dataRows = lastRow - startRow + 1;
-  const lastCol = sheet.getLastColumn();
-  if (lastCol === 0) return;
-  const fullRange = sheet.getRange(startRow, 1, dataRows, lastCol);
-
-  const values = fullRange.getValues();
-  const backgroundColors = fullRange.getBackgrounds();
-
-  const mgmtNoCol = indices.MGMT_NO;
-  const progressCol = indices.PROGRESS;
-  const tantoushaCol = indices.TANTOUSHA;
-  const toiawaseCol = indices.TOIAWASE;
-  const kibanCol = indices.KIBAN;
-  const sagyouKubunCol = indices.SAGYOU_KUBUN;
-  const DUPLICATE_COLOR = '#cccccc';
-  const uniqueKeys = new Set();
-  
-  values.forEach((row, i) => {
-    let isDuplicate = false;
-    if (kibanCol && sagyouKubunCol) {
-      const kiban = safeTrim(row[kibanCol - 1]);
-      const sagyouKubun = safeTrim(row[sagyouKubunCol - 1]);
-      
-      if (kiban && sagyouKubun) {
-        const uniqueKey = `${kiban}_${sagyouKubun}`;
-        if (uniqueKeys.has(uniqueKey)) {
-          isDuplicate = true;
-        } else {
-          uniqueKeys.add(uniqueKey);
-        }
-      }
-    }
-    
-    const baseColor = (i % 2 !== 0) ? CONFIG.COLORS.ALTERNATE_ROW : CONFIG.COLORS.DEFAULT_BACKGROUND;
-    for (let j = 0; j < lastCol; j++) {
-       backgroundColors[i][j] = baseColor;
-    }
-    
-    if (isDuplicate) {
-      for (let j = 0; j < lastCol; j++) {
-        backgroundColors[i][j] = DUPLICATE_COLOR;
-      }
-    } else {
-      if (progressCol) {
-        const progressValue = safeTrim(row[progressCol - 1]);
-        const progressColor = getColor(PROGRESS_COLORS, progressValue, baseColor);
-        backgroundColors[i][progressCol - 1] = progressColor;
-        if (mgmtNoCol) {
-          backgroundColors[i][mgmtNoCol - 1] = progressColor;
-        }
-      }
-
-      if (sagyouKubunCol) {
-        backgroundColors[i][sagyouKubunCol - 1] = getColor(SAGYOU_KUBUN_COLORS, safeTrim(row[sagyouKubunCol - 1]), baseColor);
-      }
-
-      if (sheetObject instanceof MainSheet) {
-        if (tantoushaCol) {
-          backgroundColors[i][tantoushaCol - 1] = getColor(TANTOUSHA_COLORS, safeTrim(row[tantoushaCol - 1]), baseColor);
-        }
-        if (toiawaseCol) {
-          backgroundColors[i][toiawaseCol - 1] = getColor(TOIAWASE_COLORS, safeTrim(row[toiawaseCol - 1]), baseColor);
-        }
-      }
-    }
-  });
-
-  fullRange.setBackgrounds(backgroundColors);
 }
